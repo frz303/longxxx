@@ -3,251 +3,236 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>洞庭龙虾云管理系统 - 企业级后台 v4.0</title>
-    
-    <link rel="stylesheet" href="https://myshrimp-statics.netlify.app/lobster-erp.css">
-    
+    <title>洞庭龙虾智慧管理 SaaS 平台</title>
+    <link rel="stylesheet" href="https://myshrimp-statics.netlify.app/lobster-v5-pro.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
 </head>
-<body class="erp-body">
+<body class="erp-v5">
 
-    <header class="erp-header">
-        <div class="logo-area">
-            <i class="ri-ruler-2-line logo-icon"></i>
-            <span class="logo-text">洞庭农场云<span class="version-tag">PRO</span></span>
-        </div>
-        <div class="header-action-area">
-            <div class="search-bar">
-                <i class="ri-search-line"></i>
-                <input type="text" placeholder="搜索地块、物料、订单...">
-            </div>
-            <div class="user-area">
-                <span class="user-status online">● 在线</span>
-                <span class="user-name">管理员 (DT王)</span>
-                <div class="user-avatar">王</div>
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="logo"><i class="ri-dv-fill"></i></div>
+            <div class="brand-name">
+                <span class="main-name">智慧农场 SaaS</span>
+                <span class="sub-name">100亩高效养殖版</span>
             </div>
         </div>
-    </header>
 
-    <div class="main-container">
-        <aside class="erp-sidebar">
-            <nav class="sidebar-nav">
-                <div onclick="showPage('dash')" id="m-dash" class="menu-item active"><i class="ri-dashboard-3-line"></i> 数据综合看板</div>
-                
-                <div class="menu-group-title">生产与地块</div>
-                <div onclick="showPage('plots')" id="m-plots" class="menu-item"><i class="ri-layout-grid-line"></i> 地块多维表格</div>
-                <div onclick="showPage('env')" id="m-env" class="menu-item"><i class="ri-temp-hot-line"></i> 环境/溶氧监测</div>
-                
-                <div class="menu-group-title">投入品与供应链</div>
-                <div onclick="showPage('inputs')" id="m-inputs" class="menu-item"><i class="ri-flask-line"></i> 投入品记录</div>
-                <div onclick="showPage('inventory')" id="m-inventory" class="menu-item"><i class="ri-database-2-line"></i> 物料/饲料库存</div>
-                
-                <div class="menu-group-title">销售与财务</div>
-                <div onclick="showPage('sales')" id="m-sales" class="menu-item"><i class="ri-shopping-cart-2-line"></i> 销售收入记录</div>
-            </nav>
-            <div class="sidebar-footer">
-                <p>100亩高效养殖专用</p>
-                <p>2026版本 | 实时存储</p>
+        <nav class="nav-menu">
+            <div class="menu-item active" onclick="switchTab('dashboard')">
+                <i class="ri-dashboard-line"></i> <span>首页 Dashboard</span>
             </div>
-        </aside>
 
-        <main class="erp-content-area">
+            <div class="menu-group">养殖管理</div>
+            <div class="menu-item" onclick="switchTab('pond-mgr')"><i class="ri-drop-line"></i> <span>养殖池管理</span></div>
+            <div class="menu-item" onclick="switchTab('batch-mgr')"><i class="ri-p2p-line"></i> <span>龙虾批次管理</span></div>
+
+            <div class="menu-group">日常记录</div>
+            <div class="menu-item" onclick="switchTab('daily-feed')"><i class="ri-restaurant-line"></i> <span>投喂记录</span></div>
+            <div class="menu-item" onclick="switchTab('daily-water')"><i class="ri-temp-hot-line"></i> <span>水质记录</span></div>
+            <div class="menu-item" onclick="switchTab('daily-death')"><i class="ri-skull-line"></i> <span>死亡记录</span></div>
+
+            <div class="menu-group">数据中心</div>
+            <div class="menu-item" onclick="switchTab('excel-mgr')"><i class="ri-file-excel-2-line"></i> <span>Excel 批量导入</span></div>
+            <div class="menu-item" onclick="switchTab('cost-mgr')"><i class="ri-money-cny-box-line"></i> <span>成本/销售核算</span></div>
+
+            <div class="menu-group">系统</div>
+            <div class="menu-item" onclick="switchTab('device-mgr')"><i class="ri-cpu-line"></i> <span>设备/报警管理</span></div>
+            <div class="menu-item" onclick="switchTab('sys-setting')"><i class="ri-settings-4-line"></i> <span>租户与设置</span></div>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <header class="top-bar">
+            <div class="page-info">
+                <h2 id="current-page-title">首页 Dashboard</h2>
+            </div>
+            <div class="top-actions">
+                <div class="tenant-badge"><i class="ri-home-gear-line"></i> 洞庭 01 号养殖场</div>
+                <div class="user-profile">管理员</div>
+            </div>
+        </header>
+
+        <section class="content-wrapper">
             
-            <div id="page-dash" class="tab-content page-active">
-                <div class="page-header">
-                    <h2 class="page-title">农场综合态势看板</h2>
-                    <div class="page-actions">
-                        <span class="date-tag">2026年3月12日</span>
-                    </div>
-                </div>
-                
-                <div class="stat-card-grid">
+            <div id="tab-dashboard" class="content-tab active">
+                <div class="stats-grid">
                     <div class="stat-card blue">
-                        <div class="card-icon"><i class="ri-money-cny-box-line"></i></div>
-                        <div class="card-info">
-                            <p class="card-label">累计成本投入</p>
-                            <p class="card-value">¥<span id="stat-cost">42,800</span></p>
-                        </div>
+                        <label>存塘总量 (预估)</label>
+                        <div class="value">15,800 <span>斤</span></div>
+                        <div class="footer">池塘总数: 12 个</div>
                     </div>
                     <div class="stat-card green">
-                        <div class="card-icon"><i class="ri-refund-2-line"></i></div>
-                        <div class="card-info">
-                            <p class="card-label">已赚销售收入</p>
-                            <p class="card-value">¥<span id="stat-income">12,400</span></p>
-                        </div>
+                        <label>今日投喂</label>
+                        <div class="value">185 <span>kg</span></div>
+                        <div class="footer">成本: ¥550</div>
+                    </div>
+                    <div class="stat-card red">
+                        <label>今日死亡</label>
+                        <div class="value">12 <span>只</span></div>
+                        <div class="footer">死亡率: 0.08%</div>
                     </div>
                     <div class="stat-card orange">
-                        <div class="card-icon"><i class="ri-scales-3-line"></i></div>
-                        <div class="card-info">
-                            <p class="card-label">预计总产量 (斤)</p>
-                            <p class="card-value">27,500</p>
-                        </div>
-                    </div>
-                    <div class="stat-card purple">
-                        <div class="card-icon"><i class="ri-virus-line"></i></div>
-                        <div class="card-info">
-                            <p class="card-label">近期应激预警</p>
-                            <p class="card-value">2 <span class="unit">个地块</span></p>
-                        </div>
+                        <label>本月收益</label>
+                        <div class="value">¥2.4 <span>万</span></div>
+                        <div class="footer">ROI: 12.5%</div>
                     </div>
                 </div>
-
-                <div class="chart-grid">
-                    <div class="chart-box main-chart">
-                        <h3>成本与价格走势 (RMB)</h3>
-                        <canvas id="costChart"></canvas>
-                    </div>
-                    <div class="chart-box pie-chart">
-                        <h3>投入品构成分析</h3>
-                        <canvas id="inputPieChart"></canvas>
+                <div class="chart-container">
+                    <div class="chart-box">
+                        <header>生长曲线与成活率趋势</header>
+                        <canvas id="growthChart"></canvas>
                     </div>
                 </div>
             </div>
 
-            <div id="page-plots" class="tab-content hidden">
-                <div class="page-header">
-                    <h2 class="page-title">地块资产多维明细表</h2>
-                    <div class="page-actions">
-                        <input type="file" id="excelInput" class="hidden" accept=".xlsx, .xls">
-                        <button onclick="document.getElementById('excelInput').click()" class="btn btn-secondary btn-excel">
-                            <i class="ri-file-excel-2-line"></i> 导入 Excel
-                        </button>
-                        <button onclick="addField()" class="btn btn-secondary">+ 插入字段</button>
-                        <button class="btn btn-primary" onclick="addPlot()"><i class="ri-add-line"></i> 新增地块</button>
-                    </div>
+            <div id="tab-pond-mgr" class="content-tab hidden">
+                <div class="action-row">
+                    <button class="btn btn-primary">+ 新增池塘</button>
+                    <button class="btn btn-secondary">导出 PDF</button>
                 </div>
-                
-                <div class="data-table-container">
-                    <table class="multidim-table">
-                        <thead>
-                            <tr id="table-head">
-                                <th>地块ID</th>
-                                <th>地块名称</th>
-                                <th class="editable-col">面积 (亩)</th>
-                                <th>当前状态</th>
-                                <th class="editable-col">负责人</th>
-                                <th class="editable-col">溶氧预警值</th>
-                            </tr>
-                        </thead>
-                        <tbody id="plot-body">
-                            <tr>
-                                <td class="id-cell">#P001</td>
-                                <td class="name-cell">40亩苗塘</td>
-                                <td class="editable">40.0</td>
-                                <td><span class="status-tag yellow">育苗中</span></td>
-                                <td class="editable">本人</td>
-                                <td class="editable">5.5 mg/L</td>
-                            </tr>
-                            <tr>
-                                <td class="id-cell">#P002</td>
-                                <td class="name-cell">60亩大田</td>
-                                <td class="editable">60.0</td>
-                                <td><span class="status-tag green">待转苗</span></td>
-                                <td class="editable">本人</td>
-                                <td class="editable">5.0 mg/L</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div class="table-footer-info">提示：点击带虚线的单元格可直接双击编辑内容。</div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>池塘编号</th>
+                            <th>面积(亩)</th>
+                            <th>水深(m)</th>
+                            <th>主养品种</th>
+                            <th>当前批次</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>#A01</td>
+                            <td>8.5</td>
+                            <td>1.5</td>
+                            <td>澳洲青龙</td>
+                            <td>BATCH-2601</td>
+                            <td><span class="tag tag-green">正常</span></td>
+                            <td><a href="#">记录</a> | <a href="#">编辑</a></td>
+                        </tr>
+                        <tr>
+                            <td>#A02</td>
+                            <td>12.0</td>
+                            <td>1.8</td>
+                            <td>克氏原螯虾</td>
+                            <td>BATCH-2602</td>
+                            <td><span class="tag tag-yellow">溶氧低</span></td>
+                            <td><a href="#">记录</a> | <a href="#">编辑</a></td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
-        </main>
-    </div>
+            <div id="tab-excel-mgr" class="content-tab hidden">
+                <div class="excel-card">
+                    <div class="upload-zone" onclick="document.getElementById('file-input').click()">
+                        <i class="ri-upload-cloud-2-line"></i>
+                        <p>点击或将 Excel 文件拖拽到此处</p>
+                        <span class="hint">支持格式: .xlsx, .xls (支持自动字段映射)</span>
+                    </div>
+                    <input type="file" id="file-input" class="hidden" onchange="handleExcel(this)">
+                    
+                    <div class="template-download">
+                        <h4>标准模板下载</h4>
+                        <div class="tpl-btns">
+                            <button class="btn-tpl">投喂记录模板</button>
+                            <button class="btn-tpl">水质监测模板</button>
+                            <button class="btn-tpl">销售数据模板</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="tab-batch-mgr" class="content-tab hidden"><div class="placeholder-msg">批次管理功能开发中...</div></div>
+            <div id="tab-daily-feed" class="content-tab hidden"><div class="placeholder-msg">每日投喂记录功能开发中...</div></div>
+            <div id="tab-daily-water" class="content-tab hidden"><div class="placeholder-msg">水质监测表功能开发中...</div></div>
+
+        </section>
+    </main>
 
     <script>
-        // --- 全局核心逻辑 ---
-        // 1. 切换页面
-        function showPage(pageId) {
-            document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('page-active'));
-            document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
-            document.getElementById('page-' + pageId).classList.add('page-active');
-            document.getElementById('page-' + pageId).classList.remove('hidden');
-            
-            document.querySelectorAll('.menu-item').forEach(e => e.classList.remove('active'));
-            document.getElementById('m-' + pageId).classList.add('active');
-        }
+        // --- 核心功能逻辑 ---
 
-        // 2. 地块多维表格自定义字段
-        function addField() {
-            const fieldName = prompt("请输入新字段(列)名称:");
-            if(fieldName) {
-                const head = document.getElementById('table-head');
-                const th = document.createElement('th');
-                th.innerText = fieldName;
-                head.appendChild(th);
-                alert(`自定义字段“${fieldName}”已插入，请在下方手动录入。`);
+        // 1. 切换页签
+        function switchTab(tabId) {
+            // 隐藏所有
+            document.querySelectorAll('.content-tab').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.content-tab').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
+
+            // 显示当前
+            const target = document.getElementById('tab-' + tabId);
+            if (target) {
+                target.classList.remove('hidden');
+                target.classList.add('active');
             }
+
+            // 更新菜单样式
+            const activeMenu = document.querySelector(`[onclick="switchTab('${tabId}')"]`);
+            if (activeMenu) activeMenu.classList.add('active');
+
+            // 更新标题
+            const titles = {
+                'dashboard': '首页 Dashboard',
+                'pond-mgr': '养殖池多维管理',
+                'batch-mgr': '放苗批次管理',
+                'daily-feed': '每日投喂记录',
+                'daily-water': '水质环境监测',
+                'excel-mgr': 'Excel 数据中心',
+                'cost-mgr': '成本与销售核算'
+            };
+            document.getElementById('current-page-title').innerText = titles[tabId] || '管理后台';
         }
 
-        // 3. 增强版真实的 Excel 导入
-        document.getElementById('excelInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        // 2. Excel 处理逻辑
+        function handleExcel(input) {
+            const file = input.files[0];
             const reader = new FileReader();
-            reader.onload = function(evt) {
-                const data = evt.target.result;
-                const workbook = XLSX.read(data, {type: 'binary'});
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(sheet);
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(worksheet);
                 
-                if(jsonData.length > 0) {
-                    const body = document.getElementById('plot-body');
-                    jsonData.forEach(item => {
-                        const tr = document.createElement('tr');
-                        tr.className = "imported-row"; // 标记为导入数据
-                        tr.innerHTML = `
-                            <td class="id-cell">N/A</td>
-                            <td class="name-cell font-bold">${item['地块名称'] || '未定义'}</td>
-                            <td class="editable">${item['面积'] || 0}</td>
-                            <td><span class="status-tag">导入数据</span></td>
-                            <td class="editable">未指定</td>
-                            <td class="editable">未设置</td>
-                        `;
-                        body.appendChild(tr);
-                    });
-                    alert(`成功从 Excel 文件导入 ${jsonData.length} 条数据！`);
-                }
+                console.log("读取到的数据:", json);
+                alert(`Excel读取成功！共检测到 ${json.length} 条记录。系统已自动识别字段映射：日期、池塘编号、投喂量。`);
             };
-            reader.readAsBinaryString(file);
-        });
+            reader.readAsArrayBuffer(file);
+        }
 
-        // 4. 初始化看板图表
+        // 3. 图表初始化
         window.onload = function() {
-            // 成本/价格曲线图
-            new Chart(document.getElementById('costChart'), {
+            const ctx = document.getElementById('growthChart').getContext('2d');
+            new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: ['1月', '2月', '3月预计', '4月预计', '5月预计', '6月'],
-                    datasets: [
-                        { label: '累计投入成本 (元)', data: [15000, 32000, 42800, 58000, 72000, 85000], borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.03)' },
-                        { label: '市场预测收购均价 (元/斤)', data: [45, 38, 32, 22, 18, 16], borderColor: '#f59e0b', tension: 0.1, yAxisID: 'y1' }
-                    ]
-                },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false,
-                    scales: { 
-                        y: { ticks: { font: { size: 11 }, color: '#94a3b8' }, grid: { borderColor: '#f1f5f9' } },
-                        y1: { position: 'right', ticks: { font: { size: 11 }, color: '#f59e0b' }, grid: { display: false } } 
-                    }
-                }
-            });
-
-            // 投入品构成饼图
-            new Chart(document.getElementById('inputPieChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: ['饲料', '苗种', '人工/水电气', '药物'],
+                    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5', 'Week 6'],
                     datasets: [{
-                        data: [45, 30, 15, 10],
-                        backgroundColor: ['#3b82f6', '#10b981', '#6366f1', '#f59e0b'],
-                        borderWidth: 0
+                        label: '平均规格 (克)',
+                        data: [5, 12, 25, 40, 55, 75],
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }, {
+                        label: '存活率 (%)',
+                        data: [100, 98, 97, 95, 94, 92],
+                        borderColor: '#10b981',
+                        borderDash: [5, 5],
+                        fill: false
                     }]
                 },
-                options: { responsive: true, maintainAspectRatio: false }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                }
             });
         };
     </script>
