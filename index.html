@@ -1,101 +1,470 @@
-from flask import Flask, render_template, redirect, url_for, request, flash
-from flask_sqlalchemy import SQLAlchemy
+from flask import Flask, render_template_string, request, redirect, url_for
 from datetime import datetime, date, timedelta
-from sqlalchemy import func
-import os
 
 app = Flask(__name__)
-
-# 为简单起见，线上直接用固定密钥（你可以改成别的字符串）
 app.config['SECRET_KEY'] = 'change-this-key'
 
-# 数据库使用项目目录下的 farm.db 文件
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-db_path = os.path.join(BASE_DIR, 'farm.db')
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# ========== 非持久化“假数据库”（内存里，重启会清空） ==========
+# 为了让你先看到效果，我们先不用真正的 SQLite，全部放内存。
+# 你满意这个功能后，我再帮你换成真正的 SQLite 数据库。
 
-db = SQLAlchemy(app)
+plots = []       # 地块列表
+feedings = []    # 投喂记录
+incomes = []     # 收入记录
+metrics = []     # 自定义指标
 
-# ========== 模型 ==========
+next_ids = {
+    "plot": 1,
+    "feeding": 1,
+    "income": 1,
+    "metric": 1,
+}
 
-class Plot(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    area = db.Column(db.Float, nullable=True)
-    description = db.Column(db.String(255), nullable=True)
+# ========== 简单的 HTML 模板，直接写在代码里 ==========
 
-    feedings = db.relationship('Feeding', backref='plot', lazy=True)
-    incomes = db.relationship('Income', backref='plot', lazy=True)
+BASE_HTML = """
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>龙虾养殖管理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('index') }}">龙虾养殖管理</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('plots_list') }}">地块</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('feedings_list') }}">投喂</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('incomes_list') }}">收入</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('metrics_list') }}">自定义指标</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
 
+<div class="container mb-5">
+  {% block content %}{% endblock %}
+</div>
 
-class Feeding(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    plot_id = db.Column(db.Integer, db.ForeignKey('plot.id'), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
-    feed_type = db.Column(db.String(100), nullable=False)
-    amount = db.Column(db.Float, nullable=True)
-    note = db.Column(db.String(255), nullable=True)
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+"""
 
+INDEX_HTML = """
+{% extends "base" %}
+{% block content %}
+<h2>总看板</h2>
 
-class Income(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    plot_id = db.Column(db.Integer, db.ForeignKey('plot.id'), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=date.today)
-    yield_weight = db.Column(db.Float, nullable=True)  # kg
-    income = db.Column(db.Float, nullable=True)        # 元
-    size_grade = db.Column(db.String(50), nullable=True)
-    note = db.Column(db.String(255), nullable=True)
+<div class="row mb-4">
+  <div class="col-md-8 mb-3">
+    <div class="card">
+      <div class="card-header">最近 30 天投喂总量</div>
+      <div class="card-body">
+        <canvas id="feedingChart" height="80"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4 mb-3">
+    <div class="card">
+      <div class="card-header">自定义指标</div>
+      <div class="card-body">
+        {% if metrics %}
+          {% for m in metrics %}
+            <div class="mb-2">
+              <strong>{{ m.name }}</strong>：{{ m.value }} {{ m.unit }}
+              {% if m.note %}<small class="text-muted">（{{ m.note }}）</small>{% endif %}
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="text-muted">暂无指标</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
 
+<h3>各地块产量 / 收入汇总</h3>
+<table class="table table-bordered table-sm">
+  <thead>
+    <tr>
+      <th>地块</th>
+      <th>面积</th>
+      <th>总产量（kg）</th>
+      <th>总收入（元）</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in plot_stats %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td>{{ p.area or '' }}</td>
+      <td>{{ "%.2f"|format(p.total_yield) }}</td>
+      <td>{{ "%.2f"|format(p.total_income) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
 
-class CustomMetric(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    value = db.Column(db.Float, nullable=True)
-    unit = db.Column(db.String(20), nullable=True)
-    note = db.Column(db.String(255), nullable=True)
+<script>
+  const labels = {{ feeding_labels|tojson }};
+  const data = {{ feeding_values|tojson }};
 
+  const ctx = document.getElementById('feedingChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: '每日总投喂量',
+        data: data,
+        borderColor: 'rgb(75, 192, 192)',
+        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+        tension: 0.2
+      }]
+    },
+    options: {
+      scales: {
+        y: { beginAtZero: true }
+      }
+    }
+  });
+</script>
+{% endblock %}
+"""
 
-# ========== 首页总看板 ==========
+PLOTS_LIST_HTML = """
+{% extends "base" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>地块管理</h2>
+  <a href="{{ url_for('plots_create') }}" class="btn btn-primary">新增地块</a>
+</div>
+
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>名称</th>
+      <th>面积</th>
+      <th>备注</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in plots %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.name }}</td>
+      <td>{{ p.area }}</td>
+      <td>{{ p.description }}</td>
+      <td>
+        <a href="{{ url_for('plots_edit', plot_id=p.id) }}" class="btn btn-sm btn-secondary">编辑</a>
+        <a href="{{ url_for('plots_delete', plot_id=p.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+"""
+
+PLOTS_FORM_HTML = """
+{% extends "base" %}
+{% block content %}
+<h2>{{ '编辑地块' if plot else '新增地块' }}</h2>
+
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">名称</label>
+    <input type="text" name="name" class="form-control" value="{{ plot.name if plot else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">面积</label>
+    <input type="number" step="0.01" name="area" class="form-control" value="{{ plot.area if plot and plot.area is not none else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">备注</label>
+    <textarea name="description" class="form-control">{{ plot.description if plot else '' }}</textarea>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a href="{{ url_for('plots_list') }}" class="btn btn-secondary">返回</a>
+</form>
+{% endblock %}
+"""
+
+FEEDINGS_LIST_HTML = """
+{% extends "base" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>投喂管理</h2>
+  <a href="{{ url_for('feedings_create') }}" class="btn btn-primary">新增投喂记录</a>
+</div>
+
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>日期</th>
+      <th>地块</th>
+      <th>饲料类型</th>
+      <th>投喂量</th>
+      <th>备注</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for f in feedings %}
+    <tr>
+      <td>{{ f.id }}</td>
+      <td>{{ f.date }}</td>
+      <td>{{ f.plot_name }}</td>
+      <td>{{ f.feed_type }}</td>
+      <td>{{ f.amount }}</td>
+      <td>{{ f.note }}</td>
+      <td>
+        <a href="{{ url_for('feedings_edit', feeding_id=f.id) }}" class="btn btn-sm btn-secondary">编辑</a>
+        <a href="{{ url_for('feedings_delete', feeding_id=f.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+"""
+
+FEEDINGS_FORM_HTML = """
+{% extends "base" %}
+{% block content %}
+<h2>{{ '编辑投喂记录' if feeding else '新增投喂记录' }}</h2>
+
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">地块</label>
+    <select name="plot_id" class="form-select" required>
+      {% for p in plots %}
+      <option value="{{ p.id }}" {% if feeding and feeding.plot_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">日期</label>
+    <input type="date" name="date" class="form-control" value="{{ feeding.date if feeding else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">饲料类型</label>
+    <input type="text" name="feed_type" class="form-control" value="{{ feeding.feed_type if feeding else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">投喂量</label>
+    <input type="number" step="0.01" name="amount" class="form-control" value="{{ feeding.amount if feeding and feeding.amount is not none else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">备注</label>
+    <textarea name="note" class="form-control">{{ feeding.note if feeding else '' }}</textarea>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a href="{{ url_for('feedings_list') }}" class="btn btn-secondary">返回</a>
+</form>
+{% endblock %}
+"""
+
+INCOMES_LIST_HTML = """
+{% extends "base" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>收入 / 产量管理</h2>
+  <a href="{{ url_for('incomes_create') }}" class="btn btn-primary">新增收入记录</a>
+</div>
+
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>日期</th>
+      <th>地块</th>
+      <th>产量（kg）</th>
+      <th>收入（元）</th>
+      <th>大小</th>
+      <th>备注</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for i in incomes %}
+    <tr>
+      <td>{{ i.id }}</td>
+      <td>{{ i.date }}</td>
+      <td>{{ i.plot_name }}</td>
+      <td>{{ i.yield_weight }}</td>
+      <td>{{ i.income }}</td>
+      <td>{{ i.size_grade }}</td>
+      <td>{{ i.note }}</td>
+      <td>
+        <a href="{{ url_for('incomes_edit', income_id=i.id) }}" class="btn btn-sm btn-secondary">编辑</a>
+        <a href="{{ url_for('incomes_delete', income_id=i.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+"""
+
+INCOMES_FORM_HTML = """
+{% extends "base" %}
+{% block content %}
+<h2>{{ '编辑收入记录' if income else '新增收入记录' }}</h2>
+
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">地块</label>
+    <select name="plot_id" class="form-select" required>
+      {% for p in plots %}
+      <option value="{{ p.id }}" {% if income and income.plot_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">日期</label>
+    <input type="date" name="date" class="form-control" value="{{ income.date if income else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">产量（kg）</label>
+    <input type="number" step="0.01" name="yield_weight" class="form-control" value="{{ income.yield_weight if income and income.yield_weight is not none else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">收入（元）</label>
+    <input type="number" step="0.01" name="income" class="form-control" value="{{ income.income if income and income.income is not none else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">大小</label>
+    <input type="text" name="size_grade" class="form-control" value="{{ income.size_grade if income else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">备注</label>
+    <textarea name="note" class="form-control">{{ income.note if income else '' }}</textarea>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a href="{{ url_for('incomes_list') }}" class="btn btn-secondary">返回</a>
+</form>
+{% endblock %}
+"""
+
+METRICS_LIST_HTML = """
+{% extends "base" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>自定义指标</h2>
+  <a href="{{ url_for('metrics_create') }}" class="btn btn-primary">新增指标</a>
+</div>
+
+<table class="table table-striped table-sm">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>名称</th>
+      <th>值</th>
+      <th>单位</th>
+      <th>备注</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in metrics %}
+    <tr>
+      <td>{{ m.id }}</td>
+      <td>{{ m.name }}</td>
+      <td>{{ m.value }}</td>
+      <td>{{ m.unit }}</td>
+      <td>{{ m.note }}</td>
+      <td>
+        <a href="{{ url_for('metrics_edit', metric_id=m.id) }}" class="btn btn-sm btn-secondary">编辑</a>
+        <a href="{{ url_for('metrics_delete', metric_id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+"""
+
+METRICS_FORM_HTML = """
+{% extends "base" %}
+{% block content %}
+<h2>{{ '编辑指标' if metric else '新增指标' }}</h2>
+
+<form method="post">
+  <div class="mb-3">
+    <label class="form-label">名称</label>
+    <input type="text" name="name" class="form-control" value="{{ metric.name if metric else '' }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">值</label>
+    <input type="number" step="0.01" name="value" class="form-control" value="{{ metric.value if metric and metric.value is not none else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">单位</label>
+    <input type="text" name="unit" class="form-control" value="{{ metric.unit if metric else '' }}">
+  </div>
+  <div class="mb-3">
+    <label class="form-label">备注</label>
+    <textarea name="note" class="form-control">{{ metric.note if metric else '' }}</textarea>
+  </div>
+  <button class="btn btn-primary" type="submit">保存</button>
+  <a href="{{ url_for('metrics_list') }}" class="btn btn-secondary">返回</a>
+</form>
+{% endblock %}
+"""
+
+# ========== 工具函数 ==========
+
+def get_plot_by_id(pid):
+    for p in plots:
+        if p["id"] == pid:
+            return p
+    return None
+
+# ========== 路由 ==========
 
 @app.route("/")
 def index():
-    # 按地块统计总产量和总收入
-    plot_stats = (
-        db.session.query(
-            Plot.id,
-            Plot.name,
-            Plot.area,
-            func.sum(Income.yield_weight).label("total_yield"),
-            func.sum(Income.income).label("total_income"),
-        )
-        .outerjoin(Income, Income.plot_id == Plot.id)
-        .group_by(Plot.id, Plot.name, Plot.area)
-        .all()
-    )
+    # 汇总每个地块的总产量、总收入
+    plot_stats = []
+    for p in plots:
+        total_yield = sum(i["yield_weight"] or 0 for i in incomes if i["plot_id"] == p["id"])
+        total_income = sum(i["income"] or 0 for i in incomes if i["plot_id"] == p["id"])
+        plot_stats.append({
+            "name": p["name"],
+            "area": p.get("area"),
+            "total_yield": total_yield,
+            "total_income": total_income,
+        })
 
-    # 最近 30 天投喂总量（用于图表）
+    # 最近 30 天投喂
     today = date.today()
     start_date = today - timedelta(days=30)
+    daily = {}
+    for f in feedings:
+        d = f["date"]
+        if d >= start_date:
+            daily.setdefault(d, 0)
+            daily[d] += f["amount"] or 0
 
-    feeding_data = (
-        db.session.query(
-            Feeding.date,
-            func.sum(Feeding.amount).label("total_amount")
-        )
-        .filter(Feeding.date >= start_date)
-        .group_by(Feeding.date)
-        .order_by(Feeding.date)
-        .all()
-    )
+    feeding_labels = [d.strftime("%m-%d") for d in sorted(daily.keys())]
+    feeding_values = [daily[d] for d in sorted(daily.keys())]
 
-    metrics = CustomMetric.query.all()
-
-    feeding_labels = [f.date.strftime("%m-%d") for f in feeding_data]
-    feeding_values = [float(f.total_amount or 0) for f in feeding_data]
-
-    return render_template(
-        "index.html",
+    return render_template_string(
+        "{% extends base %}" + INDEX_HTML,
+        base=BASE_HTML,
         plot_stats=plot_stats,
         metrics=metrics,
         feeding_labels=feeding_labels,
@@ -103,203 +472,293 @@ def index():
     )
 
 
-# ========== 地块管理 ==========
-
+# 地块管理
 @app.route("/plots")
 def plots_list():
-    plots = Plot.query.all()
-    return render_template("plots.html", plots=plots)
+    return render_template_string(
+        "{% extends base %}" + PLOTS_LIST_HTML,
+        base=BASE_HTML,
+        plots=plots,
+    )
 
 
 @app.route("/plots/create", methods=["GET", "POST"])
 def plots_create():
     if request.method == "POST":
-        name = request.form.get("name")
-        area = request.form.get("area") or None
-        description = request.form.get("description")
-        if not name:
-            flash("地块名称不能为空")
-            return redirect(url_for("plots_create"))
-        plot = Plot(name=name, area=area, description=description)
-        db.session.add(plot)
-        db.session.commit()
+        pid = next_ids["plot"]
+        next_ids["plot"] += 1
+        plots.append({
+            "id": pid,
+            "name": request.form.get("name"),
+            "area": float(request.form.get("area")) if request.form.get("area") else None,
+            "description": request.form.get("description"),
+        })
         return redirect(url_for("plots_list"))
-    return render_template("plots_form.html", plot=None)
+
+    return render_template_string(
+        "{% extends base %}" + PLOTS_FORM_HTML,
+        base=BASE_HTML,
+        plot=None,
+    )
 
 
 @app.route("/plots/<int:plot_id>/edit", methods=["GET", "POST"])
 def plots_edit(plot_id):
-    plot = Plot.query.get_or_404(plot_id)
+    plot = get_plot_by_id(plot_id)
+    if not plot:
+        return "未找到地块", 404
     if request.method == "POST":
-        plot.name = request.form.get("name")
-        plot.area = request.form.get("area") or None
-        plot.description = request.form.get("description")
-        db.session.commit()
+        plot["name"] = request.form.get("name")
+        plot["area"] = float(request.form.get("area")) if request.form.get("area") else None
+        plot["description"] = request.form.get("description")
         return redirect(url_for("plots_list"))
-    return render_template("plots_form.html", plot=plot)
+
+    return render_template_string(
+        "{% extends base %}" + PLOTS_FORM_HTML,
+        base=BASE_HTML,
+        plot=plot,
+    )
 
 
-@app.route("/plots/<int:plot_id>/delete", methods=["POST"])
+@app.route("/plots/<int:plot_id>/delete")
 def plots_delete(plot_id):
-    plot = Plot.query.get_or_404(plot_id)
-    db.session.delete(plot)
-    db.session.commit()
+    global plots
+    plots = [p for p in plots if p["id"] != plot_id]
     return redirect(url_for("plots_list"))
 
 
-# ========== 投喂管理 ==========
-
+# 投喂管理
 @app.route("/feedings")
 def feedings_list():
-    feedings = Feeding.query.order_by(Feeding.date.desc()).all()
-    plots = {p.id: p.name for p in Plot.query.all()}
-    return render_template("feedings.html", feedings=feedings, plots=plots)
+    view_feedings = []
+    for f in feedings:
+        p = get_plot_by_id(f["plot_id"])
+        view_feedings.append({
+            "id": f["id"],
+            "date": f["date"],
+            "plot_name": p["name"] if p else "",
+            "feed_type": f["feed_type"],
+            "amount": f["amount"],
+            "note": f["note"],
+            "plot_id": f["plot_id"],
+        })
+    return render_template_string(
+        "{% extends base %}" + FEEDINGS_LIST_HTML,
+        base=BASE_HTML,
+        feedings=view_feedings,
+    )
 
 
 @app.route("/feedings/create", methods=["GET", "POST"])
 def feedings_create():
-    plots = Plot.query.all()
     if not plots:
-        flash("请先创建地块")
-        return redirect(url_for("plots_create"))
+        return "请先创建地块", 400
 
     if request.method == "POST":
-        plot_id = int(request.form.get("plot_id"))
+        fid = next_ids["feeding"]
+        next_ids["feeding"] += 1
         date_str = request.form.get("date")
-        feed_type = request.form.get("feed_type")
-        amount = request.form.get("amount") or None
-        note = request.form.get("note")
-
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-
-        feeding = Feeding(
-            plot_id=plot_id,
-            date=date_obj,
-            feed_type=feed_type,
-            amount=amount,
-            note=note,
-        )
-        db.session.add(feeding)
-        db.session.commit()
+        f_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        feedings.append({
+            "id": fid,
+            "plot_id": int(request.form.get("plot_id")),
+            "date": f_date,
+            "feed_type": request.form.get("feed_type"),
+            "amount": float(request.form.get("amount")) if request.form.get("amount") else None,
+            "note": request.form.get("note"),
+        })
         return redirect(url_for("feedings_list"))
-    return render_template("feedings_form.html", plots=plots, feeding=None)
+
+    return render_template_string(
+        "{% extends base %}" + FEEDINGS_FORM_HTML,
+        base=BASE_HTML,
+        feeding=None,
+        plots=plots,
+    )
 
 
 @app.route("/feedings/<int:feeding_id>/edit", methods=["GET", "POST"])
 def feedings_edit(feeding_id):
-    feeding = Feeding.query.get_or_404(feeding_id)
-    plots = Plot.query.all()
+    feeding = None
+    for f in feedings:
+        if f["id"] == feeding_id:
+            feeding = f
+            break
+    if not feeding:
+        return "未找到记录", 404
+
     if request.method == "POST":
-        feeding.plot_id = int(request.form.get("plot_id"))
+        feeding["plot_id"] = int(request.form.get("plot_id"))
         date_str = request.form.get("date")
-        feeding.date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        feeding.feed_type = request.form.get("feed_type")
-        feeding.amount = request.form.get("amount") or None
-        feeding.note = request.form.get("note")
-        db.session.commit()
+        feeding["date"] = datetime.strptime(date_str, "%Y-%m-%d").date()
+        feeding["feed_type"] = request.form.get("feed_type")
+        feeding["amount"] = float(request.form.get("amount")) if request.form.get("amount") else None
+        feeding["note"] = request.form.get("note")
         return redirect(url_for("feedings_list"))
-    return render_template("feedings_form.html", plots=plots, feeding=feeding)
+
+    return render_template_string(
+        "{% extends base %}" + FEEDINGS_FORM_HTML,
+        base=BASE_HTML,
+        feeding=feeding,
+        plots=plots,
+    )
 
 
-@app.route("/feedings/<int:feeding_id>/delete", methods=["POST"])
+@app.route("/feedings/<int:feeding_id>/delete")
 def feedings_delete(feeding_id):
-    feeding = Feeding.query.get_or_404(feeding_id)
-    db.session.delete(feeding)
-    db.session.commit()
+    global feedings
+    feedings = [f for f in feedings if f["id"] != feeding_id]
     return redirect(url_for("feedings_list"))
 
 
-# ========== 收入管理 ==========
-
+# 收入管理
 @app.route("/incomes")
 def incomes_list():
-    incomes = Income.query.order_by(Income.date.desc()).all()
-    plots = {p.id: p.name for p in Plot.query.all()}
-    return render_template("incomes.html", incomes=incomes, plots=plots)
+    view_incomes = []
+    for i in incomes:
+        p = get_plot_by_id(i["plot_id"])
+        view_incomes.append({
+            "id": i["id"],
+            "date": i["date"],
+            "plot_name": p["name"] if p else "",
+            "yield_weight": i["yield_weight"],
+            "income": i["income"],
+            "size_grade": i["size_grade"],
+            "note": i["note"],
+            "plot_id": i["plot_id"],
+        })
+    return render_template_string(
+        "{% extends base %}" + INCOMES_LIST_HTML,
+        base=BASE_HTML,
+        incomes=view_incomes,
+    )
 
 
 @app.route("/incomes/create", methods=["GET", "POST"])
 def incomes_create():
-    plots = Plot.query.all()
     if not plots:
-        flash("请先创建地块")
-        return redirect(url_for("plots_create"))
+        return "请先创建地块", 400
 
     if request.method == "POST":
-        plot_id = int(request.form.get("plot_id"))
+        iid = next_ids["income"]
+        next_ids["income"] += 1
         date_str = request.form.get("date")
-        yield_weight = request.form.get("yield_weight") or None
-        income_val = request.form.get("income") or None
-        size_grade = request.form.get("size_grade")
-        note = request.form.get("note")
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
-
-        rec = Income(
-            plot_id=plot_id,
-            date=date_obj,
-            yield_weight=yield_weight,
-            income=income_val,
-            size_grade=size_grade,
-            note=note,
-        )
-        db.session.add(rec)
-        db.session.commit()
+        i_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        incomes.append({
+            "id": iid,
+            "plot_id": int(request.form.get("plot_id")),
+            "date": i_date,
+            "yield_weight": float(request.form.get("yield_weight")) if request.form.get("yield_weight") else None,
+            "income": float(request.form.get("income")) if request.form.get("income") else None,
+            "size_grade": request.form.get("size_grade"),
+            "note": request.form.get("note"),
+        })
         return redirect(url_for("incomes_list"))
-    return render_template("incomes_form.html", plots=plots, income=None)
+
+    return render_template_string(
+        "{% extends base %}" + INCOMES_FORM_HTML,
+        base=BASE_HTML,
+        income=None,
+        plots=plots,
+    )
 
 
 @app.route("/incomes/<int:income_id>/edit", methods=["GET", "POST"])
 def incomes_edit(income_id):
-    rec = Income.query.get_or_404(income_id)
-    plots = Plot.query.all()
+    income = None
+    for i in incomes:
+        if i["id"] == income_id:
+            income = i
+            break
+    if not income:
+        return "未找到记录", 404
+
     if request.method == "POST":
-        rec.plot_id = int(request.form.get("plot_id"))
+        income["plot_id"] = int(request.form.get("plot_id"))
         date_str = request.form.get("date")
-        rec.date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        rec.yield_weight = request.form.get("yield_weight") or None
-        rec.income = request.form.get("income") or None
-        rec.size_grade = request.form.get("size_grade")
-        rec.note = request.form.get("note")
-        db.session.commit()
+        income["date"] = datetime.strptime(date_str, "%Y-%m-%d").date()
+        income["yield_weight"] = float(request.form.get("yield_weight")) if request.form.get("yield_weight") else None
+        income["income"] = float(request.form.get("income")) if request.form.get("income") else None
+        income["size_grade"] = request.form.get("size_grade")
+        income["note"] = request.form.get("note")
         return redirect(url_for("incomes_list"))
-    return render_template("incomes_form.html", plots=plots, income=rec)
+
+    return render_template_string(
+        "{% extends base %}" + INCOMES_FORM_HTML,
+        base=BASE_HTML,
+        income=income,
+        plots=plots,
+    )
 
 
-@app.route("/incomes/<int:income_id>/delete", methods=["POST"])
+@app.route("/incomes/<int:income_id>/delete")
 def incomes_delete(income_id):
-    rec = Income.query.get_or_404(income_id)
-    db.session.delete(rec)
-    db.session.commit()
+    global incomes
+    incomes = [i for i in incomes if i["id"] != income_id]
     return redirect(url_for("incomes_list"))
 
 
-# ========== 自定义指标管理 ==========
-
+# 自定义指标
 @app.route("/metrics")
 def metrics_list():
-    metrics = CustomMetric.query.all()
-    return render_template("metrics.html", metrics=metrics)
+    return render_template_string(
+        "{% extends base %}" + METRICS_LIST_HTML,
+        base=BASE_HTML,
+        metrics=metrics,
+    )
 
 
 @app.route("/metrics/create", methods=["GET", "POST"])
 def metrics_create():
     if request.method == "POST":
-        name = request.form.get("name")
-        value = request.form.get("value") or None
-        unit = request.form.get("unit")
-        note = request.form.get("note")
-        metric = CustomMetric(name=name, value=value, unit=unit, note=note)
-        db.session.add(metric)
-        db.session.commit()
+        mid = next_ids["metric"]
+        next_ids["metric"] += 1
+        metrics.append({
+            "id": mid,
+            "name": request.form.get("name"),
+            "value": float(request.form.get("value")) if request.form.get("value") else None,
+            "unit": request.form.get("unit"),
+            "note": request.form.get("note"),
+        })
         return redirect(url_for("metrics_list"))
-    return render_template("metrics_form.html", metric=None)
+
+    return render_template_string(
+        "{% extends base %}" + METRICS_FORM_HTML,
+        base=BASE_HTML,
+        metric=None,
+    )
 
 
 @app.route("/metrics/<int:metric_id>/edit", methods=["GET", "POST"])
 def metrics_edit(metric_id):
-    metric = CustomMetric.query.get_or_404(metric_id)
+    metric = None
+    for m in metrics:
+        if m["id"] == metric_id:
+            metric = m
+            break
+    if not metric:
+        return "未找到指标", 404
+
     if request.method == "POST":
-        metric.name = request.form.get("name")
-        metric.value = request.form.get("value") or None
-        metric.unit = request.form.get("unit")
-        metric.note =
+        metric["name"] = request.form.get("name")
+        metric["value"] = float(request.form.get("value")) if request.form.get("value") else None
+        metric["unit"] = request.form.get("unit")
+        metric["note"] = request.form.get("note")
+        return redirect(url_for("metrics_list"))
+
+    return render_template_string(
+        "{% extends base %}" + METRICS_FORM_HTML,
+        base=BASE_HTML,
+        metric=metric,
+    )
+
+
+@app.route("/metrics/<int:metric_id>/delete")
+def metrics_delete(metric_id):
+    global metrics
+    metrics = [m for m in metrics if m["id"] != metric_id]
+    return redirect(url_for("metrics_list"))
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
