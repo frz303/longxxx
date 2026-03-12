@@ -1,261 +1,305 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>洞庭龙虾云管理系统 - 企业级后台</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
-        .sidebar-link { @apply flex items-center gap-3 px-4 py-3 text-gray-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all cursor-pointer; }
-        .sidebar-link.active { @apply bg-blue-600 text-white shadow-lg shadow-blue-900/20; }
-        .stat-card { @apply bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow; }
-        .table-row:hover { @apply bg-slate-50; }
-        .btn-primary { @apply bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-all flex items-center gap-2 font-medium; }
-    </style>
-</head>
-<body class="flex h-screen overflow-hidden">
+from flask import Flask, render_template, redirect, url_for, request, flash
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, date, timedelta
+from sqlalchemy import func
+import os
 
-    <aside class="w-72 bg-slate-950 text-white p-6 flex flex-col shrink-0">
-        <div class="mb-10 px-2">
-            <h1 class="text-2xl font-black tracking-tighter text-blue-500">SHRIMP ERP</h1>
-            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">100亩智慧农场管理平台</p>
-        </div>
-        
-        <nav class="space-y-1 overflow-y-auto flex-1">
-            <div onclick="showPage('dash')" id="m-dash" class="sidebar-link active"><i class="ri-dashboard-fill"></i> 仪表盘</div>
-            <div class="text-[10px] text-slate-600 font-bold my-4 px-2 uppercase">生产管理</div>
-            <div onclick="showPage('plots')" id="m-plots" class="sidebar-link"><i class="ri-map-fill"></i> 地块资源</div>
-            <div onclick="showPage('inputs')" id="m-inputs" class="sidebar-link"><i class="ri-box-3-fill"></i> 投入品(饲料/药)</div>
-            <div onclick="showPage('env')" id="m-env" class="sidebar-link"><i class="ri-temp-cold-fill"></i> 水质监测</div>
-            
-            <div class="text-[10px] text-slate-600 font-bold my-4 px-2 uppercase">经营管理</div>
-            <div onclick="showPage('sales')" id="m-sales" class="sidebar-link"><i class="ri-money-cny-circle-fill"></i> 销售记录</div>
-            <div onclick="showPage('inventory')" id="m-inventory" class="sidebar-link"><i class="ri-database-2-fill"></i> 仓库库存</div>
-        </nav>
+app = Flask(__name__)
 
-        <div class="mt-auto p-4 bg-slate-900 rounded-xl">
-            <div class="text-xs text-slate-400">数据同步状态</div>
-            <div class="flex items-center gap-2 mt-1 text-xs font-bold"><span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span> 云端已连接</div>
-        </div>
-    </aside>
+# 为简单起见，线上直接用固定密钥（你可以改成别的字符串）
+app.config['SECRET_KEY'] = 'change-this-key'
 
-    <main class="flex-1 flex flex-col h-full relative">
-        
-        <header class="h-16 bg-white border-b border-slate-100 flex items-center justify-between px-8">
-            <div class="relative w-96">
-                <i class="ri-search-line absolute left-3 top-2.5 text-gray-400"></i>
-                <input type="text" placeholder="搜索地块、饲料批次..." class="w-full bg-slate-50 border-none rounded-full py-2 pl-10 text-sm focus:ring-2 focus:ring-blue-500">
-            </div>
-            <div class="flex items-center gap-4">
-                <input type="file" id="excelBtn" class="hidden" accept=".xlsx, .xls">
-                <button onclick="document.getElementById('excelBtn').click()" class="text-slate-600 hover:bg-slate-100 p-2 rounded-lg transition-all" title="导入Excel">
-                    <i class="ri-file-excel-2-line text-xl"></i>
-                </button>
-                <div class="h-8 w-px bg-slate-200 mx-2"></div>
-                <div class="flex items-center gap-3">
-                    <div class="text-right hidden md:block">
-                        <div class="text-sm font-bold">洞庭虾王</div>
-                        <div class="text-[10px] text-gray-400">管理员权限</div>
-                    </div>
-                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold italic">DT</div>
-                </div>
-            </div>
-        </header>
+# 数据库使用项目目录下的 farm.db 文件
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+db_path = os.path.join(BASE_DIR, 'farm.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-        <div id="content" class="flex-1 overflow-y-auto p-8">
-            
-            <div id="page-dash" class="tab-content space-y-8">
-                <div class="flex justify-between items-end">
-                    <div>
-                        <h2 class="text-3xl font-bold">今日概况</h2>
-                        <p class="text-gray-400 mt-1">2026年3月12日，天气：晴转多云，适合投喂</p>
-                    </div>
-                    <div class="flex gap-2">
-                        <span class="px-3 py-1 bg-white border rounded-full text-xs font-medium">100亩总面积</span>
-                        <span class="px-3 py-1 bg-blue-50 text-blue-600 border border-blue-100 rounded-full text-xs font-medium">当前养殖期：第45天</span>
-                    </div>
-                </div>
+db = SQLAlchemy(app)
 
-                <div class="grid grid-cols-4 gap-6">
-                    <div class="stat-card">
-                        <div class="flex justify-between items-start">
-                            <div class="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center"><i class="ri-scales-3-line"></i></div>
-                            <span class="text-green-500 text-xs font-bold">+5.4%</span>
-                        </div>
-                        <div class="mt-4 text-gray-400 text-xs font-bold uppercase">预计总产量 (斤)</div>
-                        <div class="text-3xl font-black">27,500</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="flex justify-between items-start text-red-600">
-                            <div class="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center"><i class="ri-funds-fill"></i></div>
-                        </div>
-                        <div class="mt-4 text-gray-400 text-xs font-bold uppercase">总成本投入</div>
-                        <div class="text-3xl font-black">¥ 42,800</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="flex justify-between items-start text-green-600">
-                            <div class="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center"><i class="ri-hand-coin-fill"></i></div>
-                        </div>
-                        <div class="mt-4 text-gray-400 text-xs font-bold uppercase">已售收入</div>
-                        <div class="text-3xl font-black">¥ 12,400</div>
-                    </div>
-                    <div class="stat-card bg-blue-600 text-white border-none">
-                        <div class="flex justify-between items-start text-blue-200">
-                            <div class="w-10 h-10 bg-blue-500/50 rounded-xl flex items-center justify-center"><i class="ri-bubble-chart-fill"></i></div>
-                        </div>
-                        <div class="mt-4 text-blue-100 text-xs font-bold uppercase">资产净值 (ROI)</div>
-                        <div class="text-3xl font-black">¥ -30,400</div>
-                    </div>
-                </div>
+# ========== 模型 ==========
 
-                <div class="grid grid-cols-3 gap-6">
-                    <div class="col-span-2 bg-white p-6 rounded-2xl border shadow-sm">
-                        <h3 class="font-bold mb-6">成本与价格波动曲线</h3>
-                        <canvas id="costChart" height="280"></canvas>
-                    </div>
-                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
-                        <h3 class="font-bold mb-6">投入品构成 (饲料/苗/药)</h3>
-                        <canvas id="inputPieChart"></canvas>
-                    </div>
-                </div>
-            </div>
+class Plot(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    area = db.Column(db.Float, nullable=True)
+    description = db.Column(db.String(255), nullable=True)
 
-            <div id="page-plots" class="tab-content hidden space-y-6">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-2xl font-bold">地块资源多维表</h2>
-                    <div class="flex gap-3">
-                        <button onclick="addField()" class="border px-4 py-2 rounded-lg text-sm font-bold bg-white hover:bg-slate-50">+ 插入字段</button>
-                        <button class="btn-primary" onclick="alert('请手动在表格下方输入内容')"><i class="ri-add-line"></i> 新增地块</button>
-                    </div>
-                </div>
-                
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <table class="w-full text-sm text-left border-collapse">
-                        <thead>
-                            <tr class="bg-slate-50 border-b border-slate-200 text-slate-500" id="table-head">
-                                <th class="p-4 font-bold border-r">地块标识</th>
-                                <th class="p-4 font-bold border-r">地块名称</th>
-                                <th class="p-4 font-bold border-r">面积 (亩)</th>
-                                <th class="p-4 font-bold border-r">当前品种</th>
-                                <th class="p-4 font-bold border-r">最后记录状态</th>
-                                <th class="p-4 font-bold">负责人</th>
-                            </tr>
-                        </thead>
-                        <tbody id="plot-body">
-                            <tr class="table-row border-b border-slate-100">
-                                <td class="p-4 border-r">#P001</td>
-                                <td class="p-4 border-r font-bold">40亩苗塘</td>
-                                <td class="p-4 border-r">40.0</td>
-                                <td class="p-4 border-r text-blue-600">中华小龙虾-苗</td>
-                                <td class="p-4 border-r"><span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-[10px] font-bold">育苗中</span></td>
-                                <td class="p-4">本人</td>
-                            </tr>
-                            <tr class="table-row border-b border-slate-100">
-                                <td class="p-4 border-r">#P002</td>
-                                <td class="p-4 border-r font-bold">60亩大田</td>
-                                <td class="p-4 border-r">60.0</td>
-                                <td class="p-4 border-r text-orange-600">跑水青壳大虾</td>
-                                <td class="p-4 border-r"><span class="px-2 py-1 bg-green-100 text-green-700 rounded text-[10px] font-bold">待转苗</span></td>
-                                <td class="p-4">本人</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+    feedings = db.relationship('Feeding', backref='plot', lazy=True)
+    incomes = db.relationship('Income', backref='plot', lazy=True)
 
-        </div>
-    </main>
 
-    <script>
-        // 核心页面切换逻辑
-        function showPage(id) {
-            document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
-            document.getElementById('page-' + id).classList.remove('hidden');
-            document.querySelectorAll('.sidebar-link').forEach(e => e.classList.remove('active'));
-            document.getElementById('m-' + id).classList.add('active');
-        }
+class Feeding(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    plot_id = db.Column(db.Integer, db.ForeignKey('plot.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False, default=date.today)
+    feed_type = db.Column(db.String(100), nullable=False)
+    amount = db.Column(db.Float, nullable=True)
+    note = db.Column(db.String(255), nullable=True)
 
-        // 自定义字段
-        function addField() {
-            const fieldName = prompt("请输入新字段(列)名称:");
-            if(fieldName) {
-                const head = document.getElementById('table-head');
-                const th = document.createElement('th');
-                th.className = "p-4 font-bold border-r text-blue-600";
-                th.innerText = fieldName;
-                head.appendChild(th);
-                alert('自定义字段已插入，请在下方表格录入数据。');
-            }
-        }
 
-        // Excel 导入逻辑增强
-        document.getElementById('excelBtn').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                const data = evt.target.result;
-                const workbook = XLSX.read(data, {type: 'binary'});
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const jsonData = XLSX.utils.sheet_to_json(sheet);
-                
-                // 将Excel数据渲染到表格（示例逻辑）
-                if(jsonData.length > 0) {
-                    const body = document.getElementById('plot-body');
-                    jsonData.forEach(item => {
-                        const tr = document.createElement('tr');
-                        tr.className = "table-row border-b border-slate-100 bg-blue-50/30";
-                        tr.innerHTML = `
-                            <td class="p-4 border-r text-gray-400 italic">NEW</td>
-                            <td class="p-4 border-r font-bold text-blue-600">${item['地块名称'] || '未知'}</td>
-                            <td class="p-4 border-r">${item['面积'] || 0}</td>
-                            <td class="p-4 border-r">导入数据</td>
-                            <td class="p-4 border-r"><span class="px-2 py-1 bg-slate-200 rounded text-[10px]">已载入</span></td>
-                            <td class="p-4">系统</td>
-                        `;
-                        body.appendChild(tr);
-                    });
-                    alert(`成功从Excel导入 ${jsonData.length} 条数据！`);
-                }
-            };
-            reader.readAsBinaryString(file);
-        });
+class Income(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    plot_id = db.Column(db.Integer, db.ForeignKey('plot.id'), nullable=False)
+    date = db.Column(db.Date, nullable=False, default=date.today)
+    yield_weight = db.Column(db.Float, nullable=True)  # kg
+    income = db.Column(db.Float, nullable=True)        # 元
+    size_grade = db.Column(db.String(50), nullable=True)
+    note = db.Column(db.String(255), nullable=True)
 
-        // 初始化专业版图表
-        window.onload = function() {
-            // 曲线图
-            new Chart(document.getElementById('costChart'), {
-                type: 'line',
-                data: {
-                    labels: ['1月', '2月', '3月预计', '4月预计', '5月预计'],
-                    datasets: [
-                        { label: '累计投入 (元)', data: [15000, 32000, 42800, 58000, 72000], borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.05)' },
-                        { label: '市场预测均价 (元/斤)', data: [45, 38, 32, 22, 18], borderColor: '#f59e0b', tension: 0.1, yAxisID: 'y1' }
-                    ]
-                },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false,
-                    scales: { y1: { position: 'right', grid: { display: false } } }
-                }
-            });
 
-            // 饼图
-            new Chart(document.getElementById('inputPieChart'), {
-                type: 'doughnut',
-                data: {
-                    labels: ['饲料', '苗种', '人工/电费', '动保药物'],
-                    datasets: [{
-                        data: [45, 30, 15, 10],
-                        backgroundColor: ['#3b82f6', '#10b981', '#6366f1', '#f59e0b']
-                    }]
-                }
-            });
-        };
-    </script>
-</body>
-</html>
+class CustomMetric(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    value = db.Column(db.Float, nullable=True)
+    unit = db.Column(db.String(20), nullable=True)
+    note = db.Column(db.String(255), nullable=True)
+
+
+# ========== 首页总看板 ==========
+
+@app.route("/")
+def index():
+    # 按地块统计总产量和总收入
+    plot_stats = (
+        db.session.query(
+            Plot.id,
+            Plot.name,
+            Plot.area,
+            func.sum(Income.yield_weight).label("total_yield"),
+            func.sum(Income.income).label("total_income"),
+        )
+        .outerjoin(Income, Income.plot_id == Plot.id)
+        .group_by(Plot.id, Plot.name, Plot.area)
+        .all()
+    )
+
+    # 最近 30 天投喂总量（用于图表）
+    today = date.today()
+    start_date = today - timedelta(days=30)
+
+    feeding_data = (
+        db.session.query(
+            Feeding.date,
+            func.sum(Feeding.amount).label("total_amount")
+        )
+        .filter(Feeding.date >= start_date)
+        .group_by(Feeding.date)
+        .order_by(Feeding.date)
+        .all()
+    )
+
+    metrics = CustomMetric.query.all()
+
+    feeding_labels = [f.date.strftime("%m-%d") for f in feeding_data]
+    feeding_values = [float(f.total_amount or 0) for f in feeding_data]
+
+    return render_template(
+        "index.html",
+        plot_stats=plot_stats,
+        metrics=metrics,
+        feeding_labels=feeding_labels,
+        feeding_values=feeding_values,
+    )
+
+
+# ========== 地块管理 ==========
+
+@app.route("/plots")
+def plots_list():
+    plots = Plot.query.all()
+    return render_template("plots.html", plots=plots)
+
+
+@app.route("/plots/create", methods=["GET", "POST"])
+def plots_create():
+    if request.method == "POST":
+        name = request.form.get("name")
+        area = request.form.get("area") or None
+        description = request.form.get("description")
+        if not name:
+            flash("地块名称不能为空")
+            return redirect(url_for("plots_create"))
+        plot = Plot(name=name, area=area, description=description)
+        db.session.add(plot)
+        db.session.commit()
+        return redirect(url_for("plots_list"))
+    return render_template("plots_form.html", plot=None)
+
+
+@app.route("/plots/<int:plot_id>/edit", methods=["GET", "POST"])
+def plots_edit(plot_id):
+    plot = Plot.query.get_or_404(plot_id)
+    if request.method == "POST":
+        plot.name = request.form.get("name")
+        plot.area = request.form.get("area") or None
+        plot.description = request.form.get("description")
+        db.session.commit()
+        return redirect(url_for("plots_list"))
+    return render_template("plots_form.html", plot=plot)
+
+
+@app.route("/plots/<int:plot_id>/delete", methods=["POST"])
+def plots_delete(plot_id):
+    plot = Plot.query.get_or_404(plot_id)
+    db.session.delete(plot)
+    db.session.commit()
+    return redirect(url_for("plots_list"))
+
+
+# ========== 投喂管理 ==========
+
+@app.route("/feedings")
+def feedings_list():
+    feedings = Feeding.query.order_by(Feeding.date.desc()).all()
+    plots = {p.id: p.name for p in Plot.query.all()}
+    return render_template("feedings.html", feedings=feedings, plots=plots)
+
+
+@app.route("/feedings/create", methods=["GET", "POST"])
+def feedings_create():
+    plots = Plot.query.all()
+    if not plots:
+        flash("请先创建地块")
+        return redirect(url_for("plots_create"))
+
+    if request.method == "POST":
+        plot_id = int(request.form.get("plot_id"))
+        date_str = request.form.get("date")
+        feed_type = request.form.get("feed_type")
+        amount = request.form.get("amount") or None
+        note = request.form.get("note")
+
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+
+        feeding = Feeding(
+            plot_id=plot_id,
+            date=date_obj,
+            feed_type=feed_type,
+            amount=amount,
+            note=note,
+        )
+        db.session.add(feeding)
+        db.session.commit()
+        return redirect(url_for("feedings_list"))
+    return render_template("feedings_form.html", plots=plots, feeding=None)
+
+
+@app.route("/feedings/<int:feeding_id>/edit", methods=["GET", "POST"])
+def feedings_edit(feeding_id):
+    feeding = Feeding.query.get_or_404(feeding_id)
+    plots = Plot.query.all()
+    if request.method == "POST":
+        feeding.plot_id = int(request.form.get("plot_id"))
+        date_str = request.form.get("date")
+        feeding.date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        feeding.feed_type = request.form.get("feed_type")
+        feeding.amount = request.form.get("amount") or None
+        feeding.note = request.form.get("note")
+        db.session.commit()
+        return redirect(url_for("feedings_list"))
+    return render_template("feedings_form.html", plots=plots, feeding=feeding)
+
+
+@app.route("/feedings/<int:feeding_id>/delete", methods=["POST"])
+def feedings_delete(feeding_id):
+    feeding = Feeding.query.get_or_404(feeding_id)
+    db.session.delete(feeding)
+    db.session.commit()
+    return redirect(url_for("feedings_list"))
+
+
+# ========== 收入管理 ==========
+
+@app.route("/incomes")
+def incomes_list():
+    incomes = Income.query.order_by(Income.date.desc()).all()
+    plots = {p.id: p.name for p in Plot.query.all()}
+    return render_template("incomes.html", incomes=incomes, plots=plots)
+
+
+@app.route("/incomes/create", methods=["GET", "POST"])
+def incomes_create():
+    plots = Plot.query.all()
+    if not plots:
+        flash("请先创建地块")
+        return redirect(url_for("plots_create"))
+
+    if request.method == "POST":
+        plot_id = int(request.form.get("plot_id"))
+        date_str = request.form.get("date")
+        yield_weight = request.form.get("yield_weight") or None
+        income_val = request.form.get("income") or None
+        size_grade = request.form.get("size_grade")
+        note = request.form.get("note")
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+
+        rec = Income(
+            plot_id=plot_id,
+            date=date_obj,
+            yield_weight=yield_weight,
+            income=income_val,
+            size_grade=size_grade,
+            note=note,
+        )
+        db.session.add(rec)
+        db.session.commit()
+        return redirect(url_for("incomes_list"))
+    return render_template("incomes_form.html", plots=plots, income=None)
+
+
+@app.route("/incomes/<int:income_id>/edit", methods=["GET", "POST"])
+def incomes_edit(income_id):
+    rec = Income.query.get_or_404(income_id)
+    plots = Plot.query.all()
+    if request.method == "POST":
+        rec.plot_id = int(request.form.get("plot_id"))
+        date_str = request.form.get("date")
+        rec.date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        rec.yield_weight = request.form.get("yield_weight") or None
+        rec.income = request.form.get("income") or None
+        rec.size_grade = request.form.get("size_grade")
+        rec.note = request.form.get("note")
+        db.session.commit()
+        return redirect(url_for("incomes_list"))
+    return render_template("incomes_form.html", plots=plots, income=rec)
+
+
+@app.route("/incomes/<int:income_id>/delete", methods=["POST"])
+def incomes_delete(income_id):
+    rec = Income.query.get_or_404(income_id)
+    db.session.delete(rec)
+    db.session.commit()
+    return redirect(url_for("incomes_list"))
+
+
+# ========== 自定义指标管理 ==========
+
+@app.route("/metrics")
+def metrics_list():
+    metrics = CustomMetric.query.all()
+    return render_template("metrics.html", metrics=metrics)
+
+
+@app.route("/metrics/create", methods=["GET", "POST"])
+def metrics_create():
+    if request.method == "POST":
+        name = request.form.get("name")
+        value = request.form.get("value") or None
+        unit = request.form.get("unit")
+        note = request.form.get("note")
+        metric = CustomMetric(name=name, value=value, unit=unit, note=note)
+        db.session.add(metric)
+        db.session.commit()
+        return redirect(url_for("metrics_list"))
+    return render_template("metrics_form.html", metric=None)
+
+
+@app.route("/metrics/<int:metric_id>/edit", methods=["GET", "POST"])
+def metrics_edit(metric_id):
+    metric = CustomMetric.query.get_or_404(metric_id)
+    if request.method == "POST":
+        metric.name = request.form.get("name")
+        metric.value = request.form.get("value") or None
+        metric.unit = request.form.get("unit")
+        metric.note =
