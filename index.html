@@ -1,764 +1,255 @@
-from flask import Flask, render_template_string, request, redirect, url_for
-from datetime import datetime, date, timedelta
-
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'change-this-key'
-
-# ========== 非持久化“假数据库”（内存里，重启会清空） ==========
-# 为了让你先看到效果，我们先不用真正的 SQLite，全部放内存。
-# 你满意这个功能后，我再帮你换成真正的 SQLite 数据库。
-
-plots = []       # 地块列表
-feedings = []    # 投喂记录
-incomes = []     # 收入记录
-metrics = []     # 自定义指标
-
-next_ids = {
-    "plot": 1,
-    "feeding": 1,
-    "income": 1,
-    "metric": 1,
-}
-
-# ========== 简单的 HTML 模板，直接写在代码里 ==========
-
-BASE_HTML = """
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <title>龙虾养殖管理</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>洞庭龙虾云管理系统 - 企业级后台 v4.0</title>
+    
+    <link rel="stylesheet" href="https://myshrimp-statics.netlify.app/lobster-erp.css">
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
 </head>
-<body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="{{ url_for('index') }}">龙虾养殖管理</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-    <div class="collapse navbar-collapse" id="navbarNav">
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('plots_list') }}">地块</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('feedings_list') }}">投喂</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('incomes_list') }}">收入</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('metrics_list') }}">自定义指标</a></li>
-      </ul>
+<body class="erp-body">
+
+    <header class="erp-header">
+        <div class="logo-area">
+            <i class="ri-ruler-2-line logo-icon"></i>
+            <span class="logo-text">洞庭农场云<span class="version-tag">PRO</span></span>
+        </div>
+        <div class="header-action-area">
+            <div class="search-bar">
+                <i class="ri-search-line"></i>
+                <input type="text" placeholder="搜索地块、物料、订单...">
+            </div>
+            <div class="user-area">
+                <span class="user-status online">● 在线</span>
+                <span class="user-name">管理员 (DT王)</span>
+                <div class="user-avatar">王</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <aside class="erp-sidebar">
+            <nav class="sidebar-nav">
+                <div onclick="showPage('dash')" id="m-dash" class="menu-item active"><i class="ri-dashboard-3-line"></i> 数据综合看板</div>
+                
+                <div class="menu-group-title">生产与地块</div>
+                <div onclick="showPage('plots')" id="m-plots" class="menu-item"><i class="ri-layout-grid-line"></i> 地块多维表格</div>
+                <div onclick="showPage('env')" id="m-env" class="menu-item"><i class="ri-temp-hot-line"></i> 环境/溶氧监测</div>
+                
+                <div class="menu-group-title">投入品与供应链</div>
+                <div onclick="showPage('inputs')" id="m-inputs" class="menu-item"><i class="ri-flask-line"></i> 投入品记录</div>
+                <div onclick="showPage('inventory')" id="m-inventory" class="menu-item"><i class="ri-database-2-line"></i> 物料/饲料库存</div>
+                
+                <div class="menu-group-title">销售与财务</div>
+                <div onclick="showPage('sales')" id="m-sales" class="menu-item"><i class="ri-shopping-cart-2-line"></i> 销售收入记录</div>
+            </nav>
+            <div class="sidebar-footer">
+                <p>100亩高效养殖专用</p>
+                <p>2026版本 | 实时存储</p>
+            </div>
+        </aside>
+
+        <main class="erp-content-area">
+            
+            <div id="page-dash" class="tab-content page-active">
+                <div class="page-header">
+                    <h2 class="page-title">农场综合态势看板</h2>
+                    <div class="page-actions">
+                        <span class="date-tag">2026年3月12日</span>
+                    </div>
+                </div>
+                
+                <div class="stat-card-grid">
+                    <div class="stat-card blue">
+                        <div class="card-icon"><i class="ri-money-cny-box-line"></i></div>
+                        <div class="card-info">
+                            <p class="card-label">累计成本投入</p>
+                            <p class="card-value">¥<span id="stat-cost">42,800</span></p>
+                        </div>
+                    </div>
+                    <div class="stat-card green">
+                        <div class="card-icon"><i class="ri-refund-2-line"></i></div>
+                        <div class="card-info">
+                            <p class="card-label">已赚销售收入</p>
+                            <p class="card-value">¥<span id="stat-income">12,400</span></p>
+                        </div>
+                    </div>
+                    <div class="stat-card orange">
+                        <div class="card-icon"><i class="ri-scales-3-line"></i></div>
+                        <div class="card-info">
+                            <p class="card-label">预计总产量 (斤)</p>
+                            <p class="card-value">27,500</p>
+                        </div>
+                    </div>
+                    <div class="stat-card purple">
+                        <div class="card-icon"><i class="ri-virus-line"></i></div>
+                        <div class="card-info">
+                            <p class="card-label">近期应激预警</p>
+                            <p class="card-value">2 <span class="unit">个地块</span></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-grid">
+                    <div class="chart-box main-chart">
+                        <h3>成本与价格走势 (RMB)</h3>
+                        <canvas id="costChart"></canvas>
+                    </div>
+                    <div class="chart-box pie-chart">
+                        <h3>投入品构成分析</h3>
+                        <canvas id="inputPieChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div id="page-plots" class="tab-content hidden">
+                <div class="page-header">
+                    <h2 class="page-title">地块资产多维明细表</h2>
+                    <div class="page-actions">
+                        <input type="file" id="excelInput" class="hidden" accept=".xlsx, .xls">
+                        <button onclick="document.getElementById('excelInput').click()" class="btn btn-secondary btn-excel">
+                            <i class="ri-file-excel-2-line"></i> 导入 Excel
+                        </button>
+                        <button onclick="addField()" class="btn btn-secondary">+ 插入字段</button>
+                        <button class="btn btn-primary" onclick="addPlot()"><i class="ri-add-line"></i> 新增地块</button>
+                    </div>
+                </div>
+                
+                <div class="data-table-container">
+                    <table class="multidim-table">
+                        <thead>
+                            <tr id="table-head">
+                                <th>地块ID</th>
+                                <th>地块名称</th>
+                                <th class="editable-col">面积 (亩)</th>
+                                <th>当前状态</th>
+                                <th class="editable-col">负责人</th>
+                                <th class="editable-col">溶氧预警值</th>
+                            </tr>
+                        </thead>
+                        <tbody id="plot-body">
+                            <tr>
+                                <td class="id-cell">#P001</td>
+                                <td class="name-cell">40亩苗塘</td>
+                                <td class="editable">40.0</td>
+                                <td><span class="status-tag yellow">育苗中</span></td>
+                                <td class="editable">本人</td>
+                                <td class="editable">5.5 mg/L</td>
+                            </tr>
+                            <tr>
+                                <td class="id-cell">#P002</td>
+                                <td class="name-cell">60亩大田</td>
+                                <td class="editable">60.0</td>
+                                <td><span class="status-tag green">待转苗</span></td>
+                                <td class="editable">本人</td>
+                                <td class="editable">5.0 mg/L</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="table-footer-info">提示：点击带虚线的单元格可直接双击编辑内容。</div>
+            </div>
+
+        </main>
     </div>
-  </div>
-</nav>
 
-<div class="container mb-5">
-  {% block content %}{% endblock %}
-</div>
+    <script>
+        // --- 全局核心逻辑 ---
+        // 1. 切换页面
+        function showPage(pageId) {
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('page-active'));
+            document.querySelectorAll('.tab-content').forEach(e => e.classList.add('hidden'));
+            document.getElementById('page-' + pageId).classList.add('page-active');
+            document.getElementById('page-' + pageId).classList.remove('hidden');
+            
+            document.querySelectorAll('.menu-item').forEach(e => e.classList.remove('active'));
+            document.getElementById('m-' + pageId).classList.add('active');
+        }
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+        // 2. 地块多维表格自定义字段
+        function addField() {
+            const fieldName = prompt("请输入新字段(列)名称:");
+            if(fieldName) {
+                const head = document.getElementById('table-head');
+                const th = document.createElement('th');
+                th.innerText = fieldName;
+                head.appendChild(th);
+                alert(`自定义字段“${fieldName}”已插入，请在下方手动录入。`);
+            }
+        }
+
+        // 3. 增强版真实的 Excel 导入
+        document.getElementById('excelInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const data = evt.target.result;
+                const workbook = XLSX.read(data, {type: 'binary'});
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(sheet);
+                
+                if(jsonData.length > 0) {
+                    const body = document.getElementById('plot-body');
+                    jsonData.forEach(item => {
+                        const tr = document.createElement('tr');
+                        tr.className = "imported-row"; // 标记为导入数据
+                        tr.innerHTML = `
+                            <td class="id-cell">N/A</td>
+                            <td class="name-cell font-bold">${item['地块名称'] || '未定义'}</td>
+                            <td class="editable">${item['面积'] || 0}</td>
+                            <td><span class="status-tag">导入数据</span></td>
+                            <td class="editable">未指定</td>
+                            <td class="editable">未设置</td>
+                        `;
+                        body.appendChild(tr);
+                    });
+                    alert(`成功从 Excel 文件导入 ${jsonData.length} 条数据！`);
+                }
+            };
+            reader.readAsBinaryString(file);
+        });
+
+        // 4. 初始化看板图表
+        window.onload = function() {
+            // 成本/价格曲线图
+            new Chart(document.getElementById('costChart'), {
+                type: 'line',
+                data: {
+                    labels: ['1月', '2月', '3月预计', '4月预计', '5月预计', '6月'],
+                    datasets: [
+                        { label: '累计投入成本 (元)', data: [15000, 32000, 42800, 58000, 72000, 85000], borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.03)' },
+                        { label: '市场预测收购均价 (元/斤)', data: [45, 38, 32, 22, 18, 16], borderColor: '#f59e0b', tension: 0.1, yAxisID: 'y1' }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: { 
+                        y: { ticks: { font: { size: 11 }, color: '#94a3b8' }, grid: { borderColor: '#f1f5f9' } },
+                        y1: { position: 'right', ticks: { font: { size: 11 }, color: '#f59e0b' }, grid: { display: false } } 
+                    }
+                }
+            });
+
+            // 投入品构成饼图
+            new Chart(document.getElementById('inputPieChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['饲料', '苗种', '人工/水电气', '药物'],
+                    datasets: [{
+                        data: [45, 30, 15, 10],
+                        backgroundColor: ['#3b82f6', '#10b981', '#6366f1', '#f59e0b'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        };
+    </script>
 </body>
 </html>
-"""
-
-INDEX_HTML = """
-{% extends "base" %}
-{% block content %}
-<h2>总看板</h2>
-
-<div class="row mb-4">
-  <div class="col-md-8 mb-3">
-    <div class="card">
-      <div class="card-header">最近 30 天投喂总量</div>
-      <div class="card-body">
-        <canvas id="feedingChart" height="80"></canvas>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-4 mb-3">
-    <div class="card">
-      <div class="card-header">自定义指标</div>
-      <div class="card-body">
-        {% if metrics %}
-          {% for m in metrics %}
-            <div class="mb-2">
-              <strong>{{ m.name }}</strong>：{{ m.value }} {{ m.unit }}
-              {% if m.note %}<small class="text-muted">（{{ m.note }}）</small>{% endif %}
-            </div>
-          {% endfor %}
-        {% else %}
-          <div class="text-muted">暂无指标</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
-
-<h3>各地块产量 / 收入汇总</h3>
-<table class="table table-bordered table-sm">
-  <thead>
-    <tr>
-      <th>地块</th>
-      <th>面积</th>
-      <th>总产量（kg）</th>
-      <th>总收入（元）</th>
-    </tr>
-  </thead>
-  <tbody>
-  {% for p in plot_stats %}
-    <tr>
-      <td>{{ p.name }}</td>
-      <td>{{ p.area or '' }}</td>
-      <td>{{ "%.2f"|format(p.total_yield) }}</td>
-      <td>{{ "%.2f"|format(p.total_income) }}</td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-
-<script>
-  const labels = {{ feeding_labels|tojson }};
-  const data = {{ feeding_values|tojson }};
-
-  const ctx = document.getElementById('feedingChart').getContext('2d');
-  new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: '每日总投喂量',
-        data: data,
-        borderColor: 'rgb(75, 192, 192)',
-        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-        tension: 0.2
-      }]
-    },
-    options: {
-      scales: {
-        y: { beginAtZero: true }
-      }
-    }
-  });
-</script>
-{% endblock %}
-"""
-
-PLOTS_LIST_HTML = """
-{% extends "base" %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>地块管理</h2>
-  <a href="{{ url_for('plots_create') }}" class="btn btn-primary">新增地块</a>
-</div>
-
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>名称</th>
-      <th>面积</th>
-      <th>备注</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for p in plots %}
-    <tr>
-      <td>{{ p.id }}</td>
-      <td>{{ p.name }}</td>
-      <td>{{ p.area }}</td>
-      <td>{{ p.description }}</td>
-      <td>
-        <a href="{{ url_for('plots_edit', plot_id=p.id) }}" class="btn btn-sm btn-secondary">编辑</a>
-        <a href="{{ url_for('plots_delete', plot_id=p.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endblock %}
-"""
-
-PLOTS_FORM_HTML = """
-{% extends "base" %}
-{% block content %}
-<h2>{{ '编辑地块' if plot else '新增地块' }}</h2>
-
-<form method="post">
-  <div class="mb-3">
-    <label class="form-label">名称</label>
-    <input type="text" name="name" class="form-control" value="{{ plot.name if plot else '' }}" required>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">面积</label>
-    <input type="number" step="0.01" name="area" class="form-control" value="{{ plot.area if plot and plot.area is not none else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">备注</label>
-    <textarea name="description" class="form-control">{{ plot.description if plot else '' }}</textarea>
-  </div>
-  <button class="btn btn-primary" type="submit">保存</button>
-  <a href="{{ url_for('plots_list') }}" class="btn btn-secondary">返回</a>
-</form>
-{% endblock %}
-"""
-
-FEEDINGS_LIST_HTML = """
-{% extends "base" %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>投喂管理</h2>
-  <a href="{{ url_for('feedings_create') }}" class="btn btn-primary">新增投喂记录</a>
-</div>
-
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>日期</th>
-      <th>地块</th>
-      <th>饲料类型</th>
-      <th>投喂量</th>
-      <th>备注</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for f in feedings %}
-    <tr>
-      <td>{{ f.id }}</td>
-      <td>{{ f.date }}</td>
-      <td>{{ f.plot_name }}</td>
-      <td>{{ f.feed_type }}</td>
-      <td>{{ f.amount }}</td>
-      <td>{{ f.note }}</td>
-      <td>
-        <a href="{{ url_for('feedings_edit', feeding_id=f.id) }}" class="btn btn-sm btn-secondary">编辑</a>
-        <a href="{{ url_for('feedings_delete', feeding_id=f.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endblock %}
-"""
-
-FEEDINGS_FORM_HTML = """
-{% extends "base" %}
-{% block content %}
-<h2>{{ '编辑投喂记录' if feeding else '新增投喂记录' }}</h2>
-
-<form method="post">
-  <div class="mb-3">
-    <label class="form-label">地块</label>
-    <select name="plot_id" class="form-select" required>
-      {% for p in plots %}
-      <option value="{{ p.id }}" {% if feeding and feeding.plot_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">日期</label>
-    <input type="date" name="date" class="form-control" value="{{ feeding.date if feeding else '' }}" required>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">饲料类型</label>
-    <input type="text" name="feed_type" class="form-control" value="{{ feeding.feed_type if feeding else '' }}" required>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">投喂量</label>
-    <input type="number" step="0.01" name="amount" class="form-control" value="{{ feeding.amount if feeding and feeding.amount is not none else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">备注</label>
-    <textarea name="note" class="form-control">{{ feeding.note if feeding else '' }}</textarea>
-  </div>
-  <button class="btn btn-primary" type="submit">保存</button>
-  <a href="{{ url_for('feedings_list') }}" class="btn btn-secondary">返回</a>
-</form>
-{% endblock %}
-"""
-
-INCOMES_LIST_HTML = """
-{% extends "base" %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>收入 / 产量管理</h2>
-  <a href="{{ url_for('incomes_create') }}" class="btn btn-primary">新增收入记录</a>
-</div>
-
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>日期</th>
-      <th>地块</th>
-      <th>产量（kg）</th>
-      <th>收入（元）</th>
-      <th>大小</th>
-      <th>备注</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for i in incomes %}
-    <tr>
-      <td>{{ i.id }}</td>
-      <td>{{ i.date }}</td>
-      <td>{{ i.plot_name }}</td>
-      <td>{{ i.yield_weight }}</td>
-      <td>{{ i.income }}</td>
-      <td>{{ i.size_grade }}</td>
-      <td>{{ i.note }}</td>
-      <td>
-        <a href="{{ url_for('incomes_edit', income_id=i.id) }}" class="btn btn-sm btn-secondary">编辑</a>
-        <a href="{{ url_for('incomes_delete', income_id=i.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endblock %}
-"""
-
-INCOMES_FORM_HTML = """
-{% extends "base" %}
-{% block content %}
-<h2>{{ '编辑收入记录' if income else '新增收入记录' }}</h2>
-
-<form method="post">
-  <div class="mb-3">
-    <label class="form-label">地块</label>
-    <select name="plot_id" class="form-select" required>
-      {% for p in plots %}
-      <option value="{{ p.id }}" {% if income and income.plot_id == p.id %}selected{% endif %}>{{ p.name }}</option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">日期</label>
-    <input type="date" name="date" class="form-control" value="{{ income.date if income else '' }}" required>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">产量（kg）</label>
-    <input type="number" step="0.01" name="yield_weight" class="form-control" value="{{ income.yield_weight if income and income.yield_weight is not none else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">收入（元）</label>
-    <input type="number" step="0.01" name="income" class="form-control" value="{{ income.income if income and income.income is not none else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">大小</label>
-    <input type="text" name="size_grade" class="form-control" value="{{ income.size_grade if income else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">备注</label>
-    <textarea name="note" class="form-control">{{ income.note if income else '' }}</textarea>
-  </div>
-  <button class="btn btn-primary" type="submit">保存</button>
-  <a href="{{ url_for('incomes_list') }}" class="btn btn-secondary">返回</a>
-</form>
-{% endblock %}
-"""
-
-METRICS_LIST_HTML = """
-{% extends "base" %}
-{% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h2>自定义指标</h2>
-  <a href="{{ url_for('metrics_create') }}" class="btn btn-primary">新增指标</a>
-</div>
-
-<table class="table table-striped table-sm">
-  <thead>
-    <tr>
-      <th>ID</th>
-      <th>名称</th>
-      <th>值</th>
-      <th>单位</th>
-      <th>备注</th>
-      <th>操作</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for m in metrics %}
-    <tr>
-      <td>{{ m.id }}</td>
-      <td>{{ m.name }}</td>
-      <td>{{ m.value }}</td>
-      <td>{{ m.unit }}</td>
-      <td>{{ m.note }}</td>
-      <td>
-        <a href="{{ url_for('metrics_edit', metric_id=m.id) }}" class="btn btn-sm btn-secondary">编辑</a>
-        <a href="{{ url_for('metrics_delete', metric_id=m.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('确定删除？');">删除</a>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% endblock %}
-"""
-
-METRICS_FORM_HTML = """
-{% extends "base" %}
-{% block content %}
-<h2>{{ '编辑指标' if metric else '新增指标' }}</h2>
-
-<form method="post">
-  <div class="mb-3">
-    <label class="form-label">名称</label>
-    <input type="text" name="name" class="form-control" value="{{ metric.name if metric else '' }}" required>
-  </div>
-  <div class="mb-3">
-    <label class="form-label">值</label>
-    <input type="number" step="0.01" name="value" class="form-control" value="{{ metric.value if metric and metric.value is not none else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">单位</label>
-    <input type="text" name="unit" class="form-control" value="{{ metric.unit if metric else '' }}">
-  </div>
-  <div class="mb-3">
-    <label class="form-label">备注</label>
-    <textarea name="note" class="form-control">{{ metric.note if metric else '' }}</textarea>
-  </div>
-  <button class="btn btn-primary" type="submit">保存</button>
-  <a href="{{ url_for('metrics_list') }}" class="btn btn-secondary">返回</a>
-</form>
-{% endblock %}
-"""
-
-# ========== 工具函数 ==========
-
-def get_plot_by_id(pid):
-    for p in plots:
-        if p["id"] == pid:
-            return p
-    return None
-
-# ========== 路由 ==========
-
-@app.route("/")
-def index():
-    # 汇总每个地块的总产量、总收入
-    plot_stats = []
-    for p in plots:
-        total_yield = sum(i["yield_weight"] or 0 for i in incomes if i["plot_id"] == p["id"])
-        total_income = sum(i["income"] or 0 for i in incomes if i["plot_id"] == p["id"])
-        plot_stats.append({
-            "name": p["name"],
-            "area": p.get("area"),
-            "total_yield": total_yield,
-            "total_income": total_income,
-        })
-
-    # 最近 30 天投喂
-    today = date.today()
-    start_date = today - timedelta(days=30)
-    daily = {}
-    for f in feedings:
-        d = f["date"]
-        if d >= start_date:
-            daily.setdefault(d, 0)
-            daily[d] += f["amount"] or 0
-
-    feeding_labels = [d.strftime("%m-%d") for d in sorted(daily.keys())]
-    feeding_values = [daily[d] for d in sorted(daily.keys())]
-
-    return render_template_string(
-        "{% extends base %}" + INDEX_HTML,
-        base=BASE_HTML,
-        plot_stats=plot_stats,
-        metrics=metrics,
-        feeding_labels=feeding_labels,
-        feeding_values=feeding_values,
-    )
-
-
-# 地块管理
-@app.route("/plots")
-def plots_list():
-    return render_template_string(
-        "{% extends base %}" + PLOTS_LIST_HTML,
-        base=BASE_HTML,
-        plots=plots,
-    )
-
-
-@app.route("/plots/create", methods=["GET", "POST"])
-def plots_create():
-    if request.method == "POST":
-        pid = next_ids["plot"]
-        next_ids["plot"] += 1
-        plots.append({
-            "id": pid,
-            "name": request.form.get("name"),
-            "area": float(request.form.get("area")) if request.form.get("area") else None,
-            "description": request.form.get("description"),
-        })
-        return redirect(url_for("plots_list"))
-
-    return render_template_string(
-        "{% extends base %}" + PLOTS_FORM_HTML,
-        base=BASE_HTML,
-        plot=None,
-    )
-
-
-@app.route("/plots/<int:plot_id>/edit", methods=["GET", "POST"])
-def plots_edit(plot_id):
-    plot = get_plot_by_id(plot_id)
-    if not plot:
-        return "未找到地块", 404
-    if request.method == "POST":
-        plot["name"] = request.form.get("name")
-        plot["area"] = float(request.form.get("area")) if request.form.get("area") else None
-        plot["description"] = request.form.get("description")
-        return redirect(url_for("plots_list"))
-
-    return render_template_string(
-        "{% extends base %}" + PLOTS_FORM_HTML,
-        base=BASE_HTML,
-        plot=plot,
-    )
-
-
-@app.route("/plots/<int:plot_id>/delete")
-def plots_delete(plot_id):
-    global plots
-    plots = [p for p in plots if p["id"] != plot_id]
-    return redirect(url_for("plots_list"))
-
-
-# 投喂管理
-@app.route("/feedings")
-def feedings_list():
-    view_feedings = []
-    for f in feedings:
-        p = get_plot_by_id(f["plot_id"])
-        view_feedings.append({
-            "id": f["id"],
-            "date": f["date"],
-            "plot_name": p["name"] if p else "",
-            "feed_type": f["feed_type"],
-            "amount": f["amount"],
-            "note": f["note"],
-            "plot_id": f["plot_id"],
-        })
-    return render_template_string(
-        "{% extends base %}" + FEEDINGS_LIST_HTML,
-        base=BASE_HTML,
-        feedings=view_feedings,
-    )
-
-
-@app.route("/feedings/create", methods=["GET", "POST"])
-def feedings_create():
-    if not plots:
-        return "请先创建地块", 400
-
-    if request.method == "POST":
-        fid = next_ids["feeding"]
-        next_ids["feeding"] += 1
-        date_str = request.form.get("date")
-        f_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        feedings.append({
-            "id": fid,
-            "plot_id": int(request.form.get("plot_id")),
-            "date": f_date,
-            "feed_type": request.form.get("feed_type"),
-            "amount": float(request.form.get("amount")) if request.form.get("amount") else None,
-            "note": request.form.get("note"),
-        })
-        return redirect(url_for("feedings_list"))
-
-    return render_template_string(
-        "{% extends base %}" + FEEDINGS_FORM_HTML,
-        base=BASE_HTML,
-        feeding=None,
-        plots=plots,
-    )
-
-
-@app.route("/feedings/<int:feeding_id>/edit", methods=["GET", "POST"])
-def feedings_edit(feeding_id):
-    feeding = None
-    for f in feedings:
-        if f["id"] == feeding_id:
-            feeding = f
-            break
-    if not feeding:
-        return "未找到记录", 404
-
-    if request.method == "POST":
-        feeding["plot_id"] = int(request.form.get("plot_id"))
-        date_str = request.form.get("date")
-        feeding["date"] = datetime.strptime(date_str, "%Y-%m-%d").date()
-        feeding["feed_type"] = request.form.get("feed_type")
-        feeding["amount"] = float(request.form.get("amount")) if request.form.get("amount") else None
-        feeding["note"] = request.form.get("note")
-        return redirect(url_for("feedings_list"))
-
-    return render_template_string(
-        "{% extends base %}" + FEEDINGS_FORM_HTML,
-        base=BASE_HTML,
-        feeding=feeding,
-        plots=plots,
-    )
-
-
-@app.route("/feedings/<int:feeding_id>/delete")
-def feedings_delete(feeding_id):
-    global feedings
-    feedings = [f for f in feedings if f["id"] != feeding_id]
-    return redirect(url_for("feedings_list"))
-
-
-# 收入管理
-@app.route("/incomes")
-def incomes_list():
-    view_incomes = []
-    for i in incomes:
-        p = get_plot_by_id(i["plot_id"])
-        view_incomes.append({
-            "id": i["id"],
-            "date": i["date"],
-            "plot_name": p["name"] if p else "",
-            "yield_weight": i["yield_weight"],
-            "income": i["income"],
-            "size_grade": i["size_grade"],
-            "note": i["note"],
-            "plot_id": i["plot_id"],
-        })
-    return render_template_string(
-        "{% extends base %}" + INCOMES_LIST_HTML,
-        base=BASE_HTML,
-        incomes=view_incomes,
-    )
-
-
-@app.route("/incomes/create", methods=["GET", "POST"])
-def incomes_create():
-    if not plots:
-        return "请先创建地块", 400
-
-    if request.method == "POST":
-        iid = next_ids["income"]
-        next_ids["income"] += 1
-        date_str = request.form.get("date")
-        i_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        incomes.append({
-            "id": iid,
-            "plot_id": int(request.form.get("plot_id")),
-            "date": i_date,
-            "yield_weight": float(request.form.get("yield_weight")) if request.form.get("yield_weight") else None,
-            "income": float(request.form.get("income")) if request.form.get("income") else None,
-            "size_grade": request.form.get("size_grade"),
-            "note": request.form.get("note"),
-        })
-        return redirect(url_for("incomes_list"))
-
-    return render_template_string(
-        "{% extends base %}" + INCOMES_FORM_HTML,
-        base=BASE_HTML,
-        income=None,
-        plots=plots,
-    )
-
-
-@app.route("/incomes/<int:income_id>/edit", methods=["GET", "POST"])
-def incomes_edit(income_id):
-    income = None
-    for i in incomes:
-        if i["id"] == income_id:
-            income = i
-            break
-    if not income:
-        return "未找到记录", 404
-
-    if request.method == "POST":
-        income["plot_id"] = int(request.form.get("plot_id"))
-        date_str = request.form.get("date")
-        income["date"] = datetime.strptime(date_str, "%Y-%m-%d").date()
-        income["yield_weight"] = float(request.form.get("yield_weight")) if request.form.get("yield_weight") else None
-        income["income"] = float(request.form.get("income")) if request.form.get("income") else None
-        income["size_grade"] = request.form.get("size_grade")
-        income["note"] = request.form.get("note")
-        return redirect(url_for("incomes_list"))
-
-    return render_template_string(
-        "{% extends base %}" + INCOMES_FORM_HTML,
-        base=BASE_HTML,
-        income=income,
-        plots=plots,
-    )
-
-
-@app.route("/incomes/<int:income_id>/delete")
-def incomes_delete(income_id):
-    global incomes
-    incomes = [i for i in incomes if i["id"] != income_id]
-    return redirect(url_for("incomes_list"))
-
-
-# 自定义指标
-@app.route("/metrics")
-def metrics_list():
-    return render_template_string(
-        "{% extends base %}" + METRICS_LIST_HTML,
-        base=BASE_HTML,
-        metrics=metrics,
-    )
-
-
-@app.route("/metrics/create", methods=["GET", "POST"])
-def metrics_create():
-    if request.method == "POST":
-        mid = next_ids["metric"]
-        next_ids["metric"] += 1
-        metrics.append({
-            "id": mid,
-            "name": request.form.get("name"),
-            "value": float(request.form.get("value")) if request.form.get("value") else None,
-            "unit": request.form.get("unit"),
-            "note": request.form.get("note"),
-        })
-        return redirect(url_for("metrics_list"))
-
-    return render_template_string(
-        "{% extends base %}" + METRICS_FORM_HTML,
-        base=BASE_HTML,
-        metric=None,
-    )
-
-
-@app.route("/metrics/<int:metric_id>/edit", methods=["GET", "POST"])
-def metrics_edit(metric_id):
-    metric = None
-    for m in metrics:
-        if m["id"] == metric_id:
-            metric = m
-            break
-    if not metric:
-        return "未找到指标", 404
-
-    if request.method == "POST":
-        metric["name"] = request.form.get("name")
-        metric["value"] = float(request.form.get("value")) if request.form.get("value") else None
-        metric["unit"] = request.form.get("unit")
-        metric["note"] = request.form.get("note")
-        return redirect(url_for("metrics_list"))
-
-    return render_template_string(
-        "{% extends base %}" + METRICS_FORM_HTML,
-        base=BASE_HTML,
-        metric=metric,
-    )
-
-
-@app.route("/metrics/<int:metric_id>/delete")
-def metrics_delete(metric_id):
-    global metrics
-    metrics = [m for m in metrics if m["id"] != metric_id]
-    return redirect(url_for("metrics_list"))
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
