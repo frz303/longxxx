@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>洞庭虾王-数据管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <style>
+        .active-tab { background: #2563eb !important; color: white; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body class="bg-gray-100 flex h-screen overflow-hidden text-gray-800">
+
+    <div class="w-20 md:w-64 bg-slate-900 text-white flex flex-col transition-all">
+        <div class="p-4 md:p-6 text-xl font-bold border-b border-slate-700 text-center md:text-left">
+            <span class="hidden md:inline">🦐 洞庭虾王</span><span class="md:hidden">🦐</span>
+        </div>
+        <nav class="flex-1 p-2 md:p-4 space-y-2 mt-4">
+            <div onclick="switchTab('dashboard')" id="nav-dashboard" class="p-3 rounded-lg cursor-pointer flex items-center gap-3 hover:bg-slate-800 transition active-tab">
+                <i class="ri-dashboard-3-line"></i> <span class="hidden md:inline">总看板</span>
+            </div>
+            <div onclick="switchTab('plots')" id="nav-plots" class="p-3 rounded-lg cursor-pointer flex items-center gap-3 hover:bg-slate-800 transition">
+                <i class="ri-map-2-line"></i> <span class="hidden md:inline">地块管理</span>
+            </div>
+            <div onclick="switchTab('feeding')" id="nav-feeding" class="p-3 rounded-lg cursor-pointer flex items-center gap-3 hover:bg-slate-800 transition">
+                <i class="ri-temp-hot-line"></i> <span class="hidden md:inline">投喂记录</span>
+            </div>
+            <div onclick="switchTab('income')" id="nav-income" class="p-3 rounded-lg cursor-pointer flex items-center gap-3 hover:bg-slate-800 transition">
+                <i class="ri-copper-coin-line"></i> <span class="hidden md:inline">收入账本</span>
+            </div>
+        </nav>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-4 md:p-8">
+        
+        <div id="tab-dashboard" class="tab-content space-y-6">
+            <h2 class="text-2xl font-bold flex items-center gap-2">数据实时看板</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="card p-6 border-t-4 border-blue-500">
+                    <p class="text-gray-500 text-sm">累计支出 (饲料/苗)</p>
+                    <p class="text-3xl font-black mt-1 text-red-500">¥ <span id="stat-cost">0</span></p>
+                </div>
+                <div class="card p-6 border-t-4 border-green-500">
+                    <p class="text-gray-500 text-sm">累计收入 (卖虾)</p>
+                    <p class="text-3xl font-black mt-1 text-green-600">¥ <span id="stat-income">0</span></p>
+                </div>
+                <div class="card p-6 border-t-4 border-orange-500">
+                    <p class="text-gray-500 text-sm">净利润</p>
+                    <p class="text-3xl font-black mt-1" id="stat-profit">¥ 0</p>
+                </div>
+            </div>
+            <div class="card p-4 md:p-6">
+                <h3 class="font-bold mb-4">收支走势分析</h3>
+                <canvas id="mainChart" style="max-height: 300px;"></canvas>
+            </div>
+        </div>
+
+        <div id="tab-plots" class="tab-content hidden space-y-6">
+            <div class="flex justify-between items-center">
+                <h2 class="text-2xl font-bold">我的虾田 (亩)</h2>
+                <button onclick="addPlot()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-blue-200">新增地块</button>
+            </div>
+            <div id="plot-list" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                </div>
+        </div>
+
+        <div id="tab-feeding" class="tab-content hidden space-y-6">
+            <h2 class="text-2xl font-bold">投喂/支出录入</h2>
+            <div class="card p-6 max-w-xl">
+                <div class="space-y-4">
+                    <input type="date" id="feed-date" class="w-full border p-3 rounded-lg bg-gray-50">
+                    <select id="feed-plot" class="w-full border p-3 rounded-lg bg-gray-50"></select>
+                    <input type="number" id="feed-weight" placeholder="重量 (斤)" class="w-full border p-3 rounded-lg">
+                    <input type="number" id="feed-cost" placeholder="本日成本金额 (元)" class="w-full border p-3 rounded-lg">
+                    <button onclick="saveFeeding()" class="w-full bg-slate-900 text-white p-3 rounded-lg font-bold">保存这条记录</button>
+                </div>
+            </div>
+            <div class="card overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-50"><tr><th class="p-4">日期</th><th class="p-4">地块</th><th class="p-4">重量</th><th class="p-4">金额</th></tr></thead>
+                    <tbody id="feed-history"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="tab-income" class="tab-content hidden space-y-6">
+            <h2 class="text-2xl font-bold">卖虾收成记录</h2>
+            <div class="card p-6 max-w-xl">
+                <div class="space-y-4">
+                    <input type="date" id="inc-date" class="w-full border p-3 rounded-lg bg-gray-50">
+                    <input type="number" id="inc-weight" placeholder="收成重量 (斤)" class="w-full border p-3 rounded-lg">
+                    <input type="number" id="inc-money" placeholder="卖得金额 (元)" class="w-full border p-3 rounded-lg">
+                    <input type="text" id="inc-size" placeholder="主要规格 (如：大青)" class="w-full border p-3 rounded-lg">
+                    <button onclick="saveIncome()" class="w-full bg-green-600 text-white p-3 rounded-lg font-bold uppercase tracking-wider">确认记账</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- 核心数据库：从本地缓存加载 ---
+        let db = JSON.parse(localStorage.getItem('shrimpDB')) || {
+            plots: [
+                {name: '40亩苗塘', area: 40, status: '育苗中'},
+                {name: '60亩大田', area: 60, status: '准备中'}
+            ],
+            feeding: [],
+            income: []
+        };
+
+        function saveToLocal() {
+            localStorage.setItem('shrimpDB', JSON.stringify(db));
+            renderDashboard();
+        }
+
+        // --- 切换页面 ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById('tab-' + tabId).classList.remove('hidden');
+            document.querySelectorAll('nav div').forEach(el => el.classList.remove('active-tab'));
+            document.getElementById('nav-' + tabId).classList.add('active-tab');
+            if(tabId === 'plots') renderPlots();
+            if(tabId === 'feeding') { renderPlotSelect(); renderFeedingList(); }
+        }
+
+        // --- 地块逻辑 ---
+        function renderPlots() {
+            const list = document.getElementById('plot-list');
+            list.innerHTML = db.plots.map((p, i) => `
+                <div class="card p-5 flex justify-between items-center border-l-8 border-slate-700">
+                    <div>
+                        <h4 class="font-bold text-lg">${p.name}</h4>
+                        <p class="text-gray-500 text-sm">面积：${p.area} 亩 | 状态：${p.status}</p>
+                    </div>
+                    <button onclick="deletePlot(${i})" class="text-red-400 hover:text-red-600"><i class="ri-delete-bin-line"></i></button>
+                </div>
+            `).join('');
+        }
+
+        function addPlot() {
+            const name = prompt("请输入地块名称 (如: 1号田):");
+            const area = prompt("请输入面积 (亩):");
+            if(name && area) {
+                db.plots.push({name, area, status: '运行中'});
+                saveToLocal(); renderPlots();
+            }
+        }
+
+        function deletePlot(index) {
+            if(confirm("确定删除这个地块吗？")) {
+                db.plots.splice(index, 1);
+                saveToLocal(); renderPlots();
+            }
+        }
+
+        // --- 投喂/支出逻辑 ---
+        function renderPlotSelect() {
+            const sel = document.getElementById('feed-plot');
+            sel.innerHTML = db.plots.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+        }
+
+        function saveFeeding() {
+            const date = document.getElementById('feed-date').value;
+            const weight = document.getElementById('feed-weight').value;
+            const cost = document.getElementById('feed-cost').value;
+            const plot = document.getElementById('feed-plot').value;
+            if(!date || !weight) return alert("请填完信息");
+            db.feeding.push({date, weight, cost: parseFloat(cost || 0), plot});
+            saveToLocal();
+            alert("记录成功！");
+            renderFeedingList();
+        }
+
+        function renderFeedingList() {
+            const tbody = document.getElementById('feed-history');
+            tbody.innerHTML = db.feeding.slice(-5).reverse().map(f => `
+                <tr class="border-b text-sm">
+                    <td class="p-4">${f.date}</td>
+                    <td class="p-4 font-bold">${f.plot}</td>
+                    <td class="p-4">${f.weight} 斤</td>
+                    <td class="p-4 text-red-500">¥${f.cost}</td>
+                </tr>
+            `).join('');
+        }
+
+        // --- 收入逻辑 ---
+        function saveIncome() {
+            const date = document.getElementById('inc-date').value;
+            const money = document.getElementById('inc-money').value;
+            const weight = document.getElementById('inc-weight').value;
+            if(!date || !money) return alert("请填完金额和日期");
+            db.income.push({date, money: parseFloat(money), weight});
+            saveToLocal();
+            alert("赚大钱了！记录成功");
+            switchTab('dashboard');
+        }
+
+        // --- 仪表盘统计 ---
+        function renderDashboard() {
+            const totalCost = db.feeding.reduce((sum, item) => sum + item.cost, 0);
+            const totalIncome = db.income.reduce((sum, item) => sum + item.money, 0);
+            document.getElementById('stat-cost').innerText = totalCost.toLocaleString();
+            document.getElementById('stat-income').innerText = totalIncome.toLocaleString();
+            const profit = totalIncome - totalCost;
+            const profitEl = document.getElementById('stat-profit');
+            profitEl.innerText = '¥ ' + profit.toLocaleString();
+            profitEl.className = profit >= 0 ? 'text-3xl font-black mt-1 text-green-600' : 'text-3xl font-black mt-1 text-red-500';
+            
+            updateChart(totalCost, totalIncome);
+        }
+
+        let myChart;
+        function updateChart(c, i) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if(myChart) myChart.destroy();
+            myChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['累计成本支出', '累计卖虾收入'],
+                    datasets: [{
+                        label: '金额 (元)',
+                        data: [c, i],
+                        backgroundColor: ['#ef4444', '#22c55e']
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false }
+            });
+        }
+
+        window.onload = function() {
+            renderDashboard();
+            document.getElementById('feed-date').valueAsDate = new Date();
+            document.getElementById('inc-date').valueAsDate = new Date();
+        };
+    </script>
+</body>
+</html>
